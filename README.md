@@ -1,7 +1,6 @@
 PR 1：项目脚手架搭建
-标题
+标题：feat: project scaffold - initialize project structure with Express, WebSocket, and OpenAI dependencies
 
-feat: project scaffold - initialize project structure with Express, WebSocket, and OpenAI dependencies
 功能描述：
 搭建 AI 同声传译助手的基础项目骨架。包括：
 1.使用 Express 提供 HTTP 服务和静态文件托管
