@@ -1,6 +1,6 @@
 ﻿// public/js/subtitles.js
 // AI同声传译 - 字幕显示模块
-// 管理原文和翻译结果的字幕渲染，支持修正动画
+// 管理原文和翻译结果的字幕渲染，支持修正动画和原位更新
 
 class SubtitleManager {
   constructor(options = {}) {
@@ -9,8 +9,10 @@ class SubtitleManager {
     this.correctionList = document.getElementById("correctionList");
     this.correctionPanel = document.getElementById("correctionPanel");
 
-    this.maxItems = options.maxItems || 15;
-    this.segmentMap = new Map(); // segmentId -> DOM元素
+    this.maxItems = options.maxItems || 20;
+    // segmentId -> DOM元素映射 (用于原位修正)
+    this.translationItemMap = new Map();
+    this.originalItemMap = new Map();
 
     // 格式化时间
     this.timeFormatter = new Intl.DateTimeFormat("zh-CN", {
@@ -22,15 +24,35 @@ class SubtitleManager {
 
   /**
    * 添加/更新原文识别结果
-   * @param {object} data - { text, timestamp, segmentId }
+   * @param {object} data - { text, timestamp, segmentId, isCorrection }
    */
   addOriginalText(data) {
-    if (!data.text) return;
+    if (!data.text || !data.text.trim()) return;
 
-    // 检查是否已有相同内容的最新条目
+    const segmentId = data.segmentId || `orig_${Date.now()}`;
+
+    // 如果是对已有片段的修正，进行原位更新
+    if (data.isCorrection) {
+      const existingItem = this.originalItemMap.get(segmentId);
+      if (existingItem) {
+        this._updateItemText(existingItem, data.text, false);
+        return;
+      }
+    }
+
+    // 去重: 检查最后一条是否内容相同
     const lastItem = this.originalContainer.querySelector(".subtitle-item:last-child");
     if (lastItem && lastItem.dataset.text === data.text) {
-      return; // 相同文本不重复添加
+      return;
+    }
+
+    // 去重: 检查是否与上一条过于相似
+    const prevItem = this.originalContainer.querySelector(".subtitle-item:nth-last-child(1)");
+    if (prevItem) {
+      const prevText = prevItem.dataset.text || "";
+      if (this._isDuplicate(prevText, data.text)) {
+        return;
+      }
     }
 
     const time = this._formatTime(data.timestamp);
@@ -38,26 +60,57 @@ class SubtitleManager {
       text: data.text,
       time,
       type: "original",
-      segmentId: data.segmentId,
+      segmentId,
     });
 
-    // 如果是修正，标记
     if (data.isCorrection) {
       item.classList.add("correction");
     }
 
     this.originalContainer.appendChild(item);
-    this.segmentMap.set(`original_${data.segmentId || Date.now()}`, item);
+    this.originalItemMap.set(segmentId, item);
     this._trimContainer(this.originalContainer);
     this._scrollToBottom(this.originalContainer);
   }
 
   /**
    * 添加翻译结果
-   * @param {object} data - { translatedText, originalText, segmentId, isCorrection, timestamp }
+   * @param {object} data - { translatedText, originalText, segmentId, isCorrection, timestamp, corrections }
    */
   addTranslation(data) {
-    if (!data.translatedText) return;
+    if (!data.translatedText || !data.translatedText.trim()) return;
+
+    const segmentId = data.segmentId || `trans_${Date.now()}`;
+
+    // 如果是修正，更新已有的翻译条目
+    if (data.isCorrection && data.corrections && data.corrections.length > 0) {
+      for (const correction of data.corrections) {
+        const targetSegmentId = `trans_${correction.originalSegmentId}`;
+        const existingItem = this.translationItemMap.get(targetSegmentId);
+        if (existingItem) {
+          // 更新现有条目，添加修正标记
+          this._updateItemText(existingItem, data.translatedText, true);
+        }
+      }
+      // 同时添加为新条目
+    }
+
+    // 如果已有相同 segmentId 的条目，更新它
+    const existingItem = this.translationItemMap.get(segmentId);
+    if (existingItem) {
+      this._updateItemText(existingItem, data.translatedText, data.isCorrection);
+      return;
+    }
+
+    // 去重: 检查最后一条是否内容相同
+    const lastItem = this.translationContainer.querySelector(".subtitle-item:last-child");
+    if (lastItem) {
+      const lastText = lastItem.querySelector(".item-text")?.textContent?.trim() || "";
+      // 如果最后一条与当前翻译完全相同，跳过
+      if (lastText === data.translatedText) {
+        return;
+      }
+    }
 
     const time = this._formatTime(data.timestamp);
     const item = this._createItem({
@@ -65,27 +118,69 @@ class SubtitleManager {
       originalText: data.originalText,
       time,
       type: "translated",
-      segmentId: data.segmentId,
+      segmentId,
     });
 
     if (data.isCorrection) {
       item.classList.add("correction");
-      // 添加修正标记
-      const badge = document.createElement("span");
-      badge.className = "item-correction-badge";
-      badge.textContent = "🔄 已修正";
-      item.querySelector(".item-text").appendChild(badge);
+      this._addCorrectionBadge(item);
     }
 
     this.translationContainer.appendChild(item);
-    this.segmentMap.set(`trans_${data.segmentId || Date.now()}`, item);
+    this.translationItemMap.set(segmentId, item);
     this._trimContainer(this.translationContainer);
     this._scrollToBottom(this.translationContainer);
   }
 
   /**
-   * 添加修正通知
-   * @param {object} data - { originalSegmentId, originalText, originalTranslation, correctedTranslation, timestamp }
+   * 原位更新已有的字幕文本
+   */
+  _updateItemText(item, newText, isCorrection) {
+    const textEl = item.querySelector(".item-text");
+    if (!textEl) return;
+
+    const oldText = textEl.textContent;
+    if (oldText === newText) return;
+
+    textEl.textContent = newText;
+
+    if (isCorrection) {
+      item.classList.add("correction");
+
+      // 添加修正标记（如果还没有）
+      if (!item.querySelector(".item-correction-badge")) {
+        this._addCorrectionBadge(item);
+      }
+
+      // 触发修正闪烁动画
+      item.style.animation = "none";
+      // 强制回流
+      void item.offsetHeight;
+      item.style.animation = "correctionFlash 0.5s ease-out";
+    }
+
+    // 更新时间戳
+    const timeEl = item.querySelector(".item-time");
+    if (timeEl) {
+      timeEl.textContent = this._formatTime(Date.now());
+    }
+  }
+
+  /**
+   * 添加修正徽标
+   */
+  _addCorrectionBadge(item) {
+    const badge = document.createElement("span");
+    badge.className = "item-correction-badge";
+    badge.textContent = "🔄 已修正";
+    const textEl = item.querySelector(".item-text");
+    if (textEl) {
+      textEl.appendChild(badge);
+    }
+  }
+
+  /**
+   * 添加修正通知 (显示在独立的修正面板中)
    */
   addCorrection(data) {
     // 显示修正面板
@@ -102,10 +197,28 @@ class SubtitleManager {
     this.correctionList.appendChild(item);
     this._scrollToBottom(this.correctionList);
 
-    // 自动隐藏旧修正
-    if (this.correctionList.children.length > 5) {
+    // 限制修正记录数量
+    while (this.correctionList.children.length > 10) {
       this.correctionList.removeChild(this.correctionList.firstChild);
     }
+  }
+
+  /**
+   * 检查两条文本是否重复（编辑距离简单判定）
+   */
+  _isDuplicate(textA, textB) {
+    if (!textA || !textB) return false;
+    if (textA === textB) return true;
+
+    // 如果短的文本是长文本的子串，且长度接近
+    const short = textA.length <= textB.length ? textA : textB;
+    const long = textA.length > textB.length ? textA : textB;
+
+    if (short.length > long.length * 0.5 && long.includes(short)) {
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -116,7 +229,8 @@ class SubtitleManager {
     this.translationContainer.innerHTML = `<div class="placeholder-text">等待翻译结果...</div>`;
     this.correctionList.innerHTML = "";
     this.correctionPanel.style.display = "none";
-    this.segmentMap.clear();
+    this.translationItemMap.clear();
+    this.originalItemMap.clear();
   }
 
   /**
@@ -140,7 +254,6 @@ class SubtitleManager {
     textEl.className = "item-text";
     textEl.textContent = text;
 
-    // 如果有原文，用小字显示
     item.appendChild(timeEl);
     item.appendChild(label);
     item.appendChild(textEl);
@@ -161,7 +274,8 @@ class SubtitleManager {
   _trimContainer(container) {
     const items = container.querySelectorAll(".subtitle-item");
     while (items.length > this.maxItems) {
-      container.removeChild(items[0]);
+      const first = items[0];
+      container.removeChild(first);
     }
   }
 
