@@ -9,6 +9,7 @@ class InterpretApp {
     this.subtitleManager = null;
     this.isConnected = false;
     this.isRecording = false;
+    this.isDemoMode = false;
     this.serverUrl = "ws://localhost:3000";
 
     // DOM 元素引用
@@ -35,6 +36,10 @@ class InterpretApp {
   init() {
     this.subtitleManager = new SubtitleManager({ maxItems: 20 });
 
+    // 初始化 canvas 尺寸
+    this._resizeVisualizer();
+    window.addEventListener("resize", () => this._resizeVisualizer());
+
     // 绑定事件
     this.elements.btnConnect.addEventListener("click", () => this.connect());
     this.elements.btnRecord.addEventListener("click", () => this.toggleRecording());
@@ -48,11 +53,10 @@ class InterpretApp {
       if (e.key === "Enter") this.connect();
     });
 
-    // 检查是否已有服务运行
+    // 检查服务器状态并尝试自动连接
     this._checkServerHealth();
 
     console.log("[应用] AI同声传译助手已初始化");
-    console.log("[应用] 请点击「连接」按钮连接到后端服务");
   }
 
   /**
@@ -61,6 +65,12 @@ class InterpretApp {
   async connect() {
     const url = this.elements.serverUrl.value.trim() || this.serverUrl;
 
+    // 如果已有连接,先关闭
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+
     try {
       this._setStatus("connecting", "连接中...");
 
@@ -68,13 +78,14 @@ class InterpretApp {
 
       this.ws.onopen = () => {
         this.isConnected = true;
-        this._setStatus("connected", "已连接");
+        this._setStatus("connected", this.isDemoMode ? "演示模式" : "已连接");
         this.elements.btnRecord.disabled = false;
         this.elements.connectModal.style.display = "none";
 
         // 发送语言配置
         this._sendLangConfig();
-        console.log("[WebSocket] 已连接到服务器");
+
+        console.log(`[WebSocket] 已连接到服务器`);
       };
 
       this.ws.onmessage = (event) => {
@@ -90,7 +101,10 @@ class InterpretApp {
         this.isConnected = false;
         this._setStatus("error", "已断开");
         this.elements.btnRecord.disabled = true;
-        this.elements.connectModal.style.display = "flex";
+
+        if (!this.isRecording) {
+          this.elements.connectModal.style.display = "flex";
+        }
 
         if (this.isRecording) {
           this.stopRecording();
@@ -99,10 +113,13 @@ class InterpretApp {
         console.log("[WebSocket] 连接已断开");
       };
 
-      this.ws.onerror = (error) => {
-        console.error("[WebSocket] 连接错误:", error);
+      this.ws.onerror = () => {
         this._setStatus("error", "连接失败");
-        alert(`无法连接到服务器 (${url})\n请确保后端服务已启动: npm start`);
+        this.elements.connectModal.style.display = "flex";
+
+        if (!this.isDemoMode) {
+          console.error("[WebSocket] 连接失败，请确认服务器已启动");
+        }
       };
     } catch (error) {
       console.error("[WebSocket] 连接异常:", error);
@@ -136,7 +153,6 @@ class InterpretApp {
     this.audioCapture.onAudioChunk = async (audioBlob) => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         try {
-          // 将音频 blob 转换为 base64 发送
           const buffer = await audioBlob.arrayBuffer();
           const base64 = this._arrayBufferToBase64(buffer);
           const format = audioBlob.type.split("/")[1]?.split(";")[0] || "webm";
@@ -188,15 +204,18 @@ class InterpretApp {
     this.elements.btnRecord.querySelector(".btn-icon").textContent = "🎤";
 
     if (this.isConnected) {
-      this._setStatus("connected", "已连接");
+      this._setStatus("connected", this.isDemoMode ? "演示模式" : "已连接");
     }
 
     this.elements.sttBadge.textContent = "已停止";
     this.elements.transBadge.textContent = "已停止";
+
+    // 重置可视化
+    this._drawIdleVisualizer();
   }
 
   /**
-   * 重置会话 (清空翻译上下文)
+   * 重置会话
    */
   resetSession() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -236,10 +255,12 @@ class InterpretApp {
     switch (data.type) {
       case "connected":
         console.log(`[服务器] 已连接, ID: ${data.clientId}`);
+        if (data.message) {
+          console.log(`[服务器] ${data.message}`);
+        }
         break;
 
       case "partial_stt":
-        // 更新原文识别状态
         this.elements.sttBadge.textContent = `已识别 ${data.text.length}字`;
         this.subtitleManager.addOriginalText({
           text: data.text,
@@ -249,19 +270,18 @@ class InterpretApp {
         break;
 
       case "translation":
-        // 显示翻译结果
         this.elements.transBadge.textContent = `${data.translatedText.length}字`;
         this.subtitleManager.addTranslation({
           translatedText: data.translatedText,
           originalText: data.originalText,
-          segmentId: data.segmentId,
+          segmentId: data.segmentId ? `trans_${data.segmentId}` : `trans_${Date.now()}`,
           isCorrection: data.isCorrection,
+          corrections: data.corrections,
           timestamp: data.timestamp,
         });
         break;
 
       case "correction":
-        // 显示修正通知
         this.subtitleManager.addCorrection({
           originalSegmentId: data.originalSegmentId,
           originalText: data.originalText,
@@ -283,8 +303,29 @@ class InterpretApp {
         break;
 
       default:
-        console.log("[服务器] 未知消息:", data.type);
+        console.log("[服务器] 未知消息类型:", data.type);
     }
+  }
+
+  /**
+   * 调整 canvas 尺寸以适应容器
+   */
+  _resizeVisualizer() {
+    const canvas = this.elements.visualizer;
+    if (!canvas) return;
+
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+
+    canvas.width = rect.width * dpr;
+    canvas.height = 60 * dpr;
+    canvas.style.width = `${rect.width}px`;
+    canvas.style.height = "60px";
+
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    this._drawIdleVisualizer();
   }
 
   /**
@@ -295,33 +336,89 @@ class InterpretApp {
     if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
-    const width = canvas.width;
-    const height = canvas.height;
+    const width = canvas.width / (window.devicePixelRatio || 1);
+    const height = canvas.height / (window.devicePixelRatio || 1);
 
     ctx.clearRect(0, 0, width, height);
 
-    // 绘制背景
+    // 背景
     ctx.fillStyle = "#1e1b4b";
     ctx.fillRect(0, 0, width, height);
 
-    // 绘制频率柱
+    if (!data || data.length === 0) {
+      this._drawIdleText(ctx, width, height);
+      return;
+    }
+
+    // 绘制频率柱状图
     const barCount = Math.min(data.length, 64);
     const barWidth = width / barCount;
+    const barSpacing = 1;
 
     for (let i = 0; i < barCount; i++) {
       const value = data[i] / 255;
-      const barHeight = value * height;
+      const barHeight = Math.max(1, value * height);
 
-      // 颜色渐变
-      const hue = 240 - value * 180;
-      ctx.fillStyle = `hsl(${hue}, 80%, ${50 + value * 30}%)`;
+      // 从紫色渐变到青色
+      const hue = 260 - value * 180;
+      ctx.fillStyle = `hsl(${hue}, 85%, ${40 + value * 40}%)`;
 
       ctx.fillRect(
-        i * barWidth,
+        i * barWidth + barSpacing / 2,
         height - barHeight,
-        barWidth - 1,
+        barWidth - barSpacing,
         barHeight
       );
+    }
+
+    // 绘制底部水平指示线
+    if (this.isRecording) {
+      ctx.fillStyle = "rgba(16, 185, 129, 0.2)";
+      ctx.fillRect(0, height - 2, width, 2);
+    }
+  }
+
+  /**
+   * 绘制空闲状态可视化
+   */
+  _drawIdleVisualizer() {
+    const canvas = this.elements.visualizer;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width / (window.devicePixelRatio || 1);
+    const height = canvas.height / (window.devicePixelRatio || 1);
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#1e1b4b";
+    ctx.fillRect(0, 0, width, height);
+
+    this._drawIdleText(ctx, width, height);
+  }
+
+  /**
+   * 绘制空闲提示文字
+   */
+  _drawIdleText(ctx, width, height) {
+    ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.font = "14px -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    const text = this.isRecording ? "" : "点击「开始录音」查看音频可视化";
+    if (text) {
+      ctx.fillText(text, width / 2, height / 2);
+    }
+
+    // 绘制底部状态点
+    if (this.isRecording) {
+      ctx.fillStyle = "#ef4444";
+      ctx.beginPath();
+      ctx.arc(width / 2, height / 2, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
+      ctx.font = "11px -apple-system, sans-serif";
+      ctx.fillText("正在录音...", width / 2 + 10, height / 2);
     }
   }
 
@@ -340,26 +437,40 @@ class InterpretApp {
   }
 
   /**
-   * 检查服务器健康状态
+   * 检查服务器健康状态，尝试自动连接
    */
   async _checkServerHealth() {
+    const serverUrl = this.elements.serverUrl.value.trim() || this.serverUrl;
+    const httpUrl = serverUrl.replace("ws://", "http://").replace("wss://", "https://");
+
     try {
-      const httpUrl = this.elements.serverUrl.value.replace("ws://", "http://").replace("wss://", "https://");
-      const response = await fetch(`${httpUrl}/api/health`);
+      const response = await fetch(`${httpUrl}/api/health`, {
+        // 快速超时
+        signal: AbortSignal.timeout(3000),
+      });
+
       if (response.ok) {
         const data = await response.json();
-        console.log("[应用] 后端服务运行中:", data);
+        console.log("[应用] 后端服务:", data);
 
-        if (data.config.apiKeyConfigured) {
-          this.elements.btnConnect.textContent = "✓ 自动连接";
-          this.connect();
+        this.isDemoMode = data.mode === "demo";
+
+        if (this.isDemoMode) {
+          this.elements.connectModal.querySelector("h2").textContent = "🎯 演示模式";
+          this.elements.connectModal.querySelector("p").innerHTML =
+            "服务器以<strong>演示模式</strong>运行，使用模拟数据。<br>可正常体验界面，无需 API Key。";
+          this.elements.btnConnect.textContent = "🎯 进入演示模式";
         } else {
-          console.warn("[应用] API Key 未配置，请创建 .env 文件");
+          this.elements.btnConnect.textContent = "✓ 已配置 API Key";
         }
+
+        // 自动连接
+        this.connect();
       }
     } catch {
-      // 服务未启动，等待用户点击连接
-      console.log("[应用] 等待用户连接...");
+      // 服务器未启动，等待用户手动连接
+      console.log("[应用] 服务器未启动，等待用户操作");
+      this.elements.connectModal.style.display = "flex";
     }
   }
 

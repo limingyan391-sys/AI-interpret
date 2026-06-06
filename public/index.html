@@ -85,7 +85,8 @@
       <!-- 修正通知区 -->
       <div class="correction-panel" id="correctionPanel" style="display:none;">
         <div class="panel-header">
-          <h3>🔄 修正</h3>
+          <h3>🔄 修正记录</h3>
+          <span style="font-size:12px;color:var(--text-secondary);">系统自动检测并修正识别/翻译错误</span>
         </div>
         <div class="correction-list" id="correctionList"></div>
       </div>
@@ -93,7 +94,7 @@
 
     <!-- 音频可视化 -->
     <section class="visualizer-section">
-      <canvas id="audioVisualizer" width="800" height="60"></canvas>
+      <canvas id="audioVisualizer"></canvas>
     </section>
   </main>
 
@@ -101,7 +102,7 @@
   <div class="modal-overlay" id="connectModal">
     <div class="modal">
       <h2>🔌 连接到服务</h2>
-      <p>请确保后端服务已启动，配置 API Key 后可开始使用。</p>
+      <p>请确认后端服务正在运行。<br>首次使用请参考 README.md 进行配置。</p>
       <div class="form-group">
         <label for="serverUrl">服务器地址</label>
         <input type="text" id="serverUrl" value="ws://localhost:3000" />
@@ -109,7 +110,10 @@
       <div class="modal-actions">
         <button class="btn btn-primary" id="btnConnect">连接</button>
       </div>
-      <p class="hint">提示: 先运行 <code>npm start</code> 启动后端</p>
+      <p class="hint">
+        💡 运行 <code>npm run demo</code> 可启动演示模式（无需 API Key）<br>
+        💡 运行 <code>npm start</code> 启动生产模式（需配置 API Key）
+      </p>
     </div>
   </div>
 

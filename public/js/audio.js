@@ -10,10 +10,10 @@ class AudioCapture {
     this.audioContext = null;
     this.analyserNode = null;
     this.isCapturing = false;
-    this.onAudioChunk = null; // 回调: function(audioBlob)
-    this.onVisualizationData = null; // 回调: function(frequencyData)
+    this.onAudioChunk = null;
+    this.onVisualizationData = null;
 
-    this.chunkInterval = 3000; // 每3秒发送一个音频块
+    this.chunkInterval = 3000;
     this.intervalId = null;
     this.animationId = null;
   }
@@ -21,8 +21,8 @@ class AudioCapture {
   /**
    * 请求麦克风权限并启动音频捕获
    * @param {object} options
-   * @param {number} options.chunkInterval - 音频块间隔(ms)，默认3000
-   * @returns {Promise<boolean>} 是否成功启动
+   * @param {number} options.chunkInterval - 音频块间隔(ms)
+   * @returns {Promise<boolean>}
    */
   async start(options = {}) {
     if (this.isCapturing) {
@@ -44,7 +44,7 @@ class AudioCapture {
 
       console.log("[音频] 麦克风权限已获取");
 
-      // 设置音频分析器 (用于可视化)
+      // 设置音频分析器
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
       const source = this.audioContext.createMediaStreamSource(this.stream);
       this.analyserNode = this.audioContext.createAnalyser();
@@ -63,7 +63,6 @@ class AudioCapture {
         audioBitsPerSecond: 64000,
       });
 
-      // 收集音频数据
       let audioChunks = [];
 
       this.mediaRecorder.ondataavailable = (event) => {
@@ -72,7 +71,6 @@ class AudioCapture {
         }
       };
 
-      // 每个 chunk 完成时触发
       this.mediaRecorder.onstop = () => {
         if (audioChunks.length > 0) {
           const audioBlob = new Blob(audioChunks, { type: mimeType });
@@ -84,18 +82,26 @@ class AudioCapture {
         }
       };
 
-      // 开始录制: 按间隔产生数据块
-      this.mediaRecorder.start(this.chunkInterval);
-
-      // 额外定时器确保即使 MediaRecorder 未按时触发也能发送
-      this.intervalId = setInterval(() => {
-        if (this.mediaRecorder && this.mediaRecorder.state === "recording") {
-          this.mediaRecorder.stop();
-          // 立即开始新一段录制
-          audioChunks = [];
-          this.mediaRecorder.start(this.chunkInterval);
-        }
-      }, this.chunkInterval);
+      // 使用 timeslice 参数让 MediaRecorder 按间隔产生数据块
+      // 避免手动 stop/start 导致的音频间隙
+      try {
+        this.mediaRecorder.start(this.chunkInterval);
+      } catch (e) {
+        // 如果浏览器不支持 timeslice 参数，回退到手动模式
+        console.warn("[音频] timeslice 模式不支持，回退到手动分段");
+        this.mediaRecorder.start();
+        this.intervalId = setInterval(() => {
+          if (this.mediaRecorder && this.mediaRecorder.state === "recording") {
+            this.mediaRecorder.stop();
+            audioChunks = [];
+            try {
+              this.mediaRecorder.start(this.chunkInterval);
+            } catch {
+              this.mediaRecorder.start();
+            }
+          }
+        }, this.chunkInterval);
+      }
 
       this.isCapturing = true;
       console.log("[音频] 音频捕获已启动");
@@ -107,6 +113,8 @@ class AudioCapture {
         alert("麦克风权限被拒绝，请在浏览器设置中允许麦克风访问");
       } else if (error.name === "NotFoundError") {
         alert("未检测到麦克风设备，请连接麦克风后重试");
+      } else if (error.name === "NotReadableError") {
+        alert("麦克风被其他应用占用，请关闭其他录音程序后重试");
       }
 
       return false;
@@ -119,24 +127,20 @@ class AudioCapture {
   stop() {
     if (!this.isCapturing) return;
 
-    // 停止录制
     if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
       this.mediaRecorder.stop();
     }
 
-    // 停止定时器
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
 
-    // 停止可视化
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
     }
 
-    // 释放音频资源
     if (this.audioContext) {
       this.audioContext.close().catch(() => {});
       this.audioContext = null;
@@ -169,11 +173,11 @@ class AudioCapture {
       }
     }
 
-    return ""; // 让浏览器选择默认格式
+    return "";
   }
 
   /**
-   * 启动音频可视化 (绘制频率波形)
+   * 启动音频可视化循环
    */
   _startVisualization() {
     const draw = () => {
