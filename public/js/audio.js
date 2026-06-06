@@ -1,141 +1,210 @@
 ﻿// public/js/audio.js
-// AI同声传译 - 音频捕获模块
-// 使用浏览器 MediaRecorder API 捕获麦克风音频
-// MDN参考: https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder
+// AI同声传译 - 音频捕获模块 (Web Speech API 版)
+// 使用浏览器内置的 Web Speech API 进行语音识别
+// 无需 API Key，免费使用，支持多语言
+//
+// 兼容性: Chrome 25+, Edge 79+, Safari 14.1+
+// MDN: https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition
 
-class AudioCapture {
+class SpeechCapture {
   constructor() {
-    this.mediaRecorder = null;
-    this.stream = null;
+    this.recognition = null;
+    this.isCapturing = false;
+    this.isListening = false;
+    this.restartTimeout = null;
     this.audioContext = null;
     this.analyserNode = null;
-    this.isCapturing = false;
-    this.onAudioChunk = null;
-    this.onVisualizationData = null;
-
-    this.chunkInterval = 3000;
-    this.intervalId = null;
+    this.stream = null;
     this.animationId = null;
+
+    // 回调
+    this.onResult = null;         // 最终识别结果: function(text)
+    this.onInterimResult = null;  // 中间识别结果: function(text)
+    this.onVisualizationData = null;
+    this.onError = null;
+
+    // 语言映射
+    this.langMap = {
+      en: "en-US",
+      zh: "zh-CN",
+      ja: "ja-JP",
+      ko: "ko-KR",
+      fr: "fr-FR",
+      de: "de-DE",
+      es: "es-ES",
+    };
+
+    this.currentLang = "en-US";
+    this.lastFinalText = "";
   }
 
   /**
-   * 请求麦克风权限并启动音频捕获
+   * 启动语音识别
    * @param {object} options
-   * @param {number} options.chunkInterval - 音频块间隔(ms)
+   * @param {string} options.language - ISO 639-1 语言代码
    * @returns {Promise<boolean>}
    */
   async start(options = {}) {
     if (this.isCapturing) {
-      console.warn("[音频] 已在捕获中");
+      console.warn("[语音] 已在运行中");
       return false;
     }
 
-    this.chunkInterval = options.chunkInterval || 3000;
+    // 检查浏览器是否支持 Web Speech API
+    if (!this._isSupported()) {
+      const msg = "您的浏览器不支持 Web Speech API。请使用 Chrome 或 Edge。";
+      console.error("[语音]", msg);
+      if (this.onError) this.onError(msg);
+      return false;
+    }
+
+    this.currentLang = this.langMap[options.language] || "en-US";
 
     try {
-      // 请求麦克风权限
+      // 获取麦克风权限 (用于可视化)
       this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          sampleRate: 16000,
-        },
+        audio: { echoCancellation: true, noiseSuppression: true },
       });
 
-      console.log("[音频] 麦克风权限已获取");
-
-      // 设置音频分析器
+      // 设置音频分析器 (可视化)
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
       const source = this.audioContext.createMediaStreamSource(this.stream);
       this.analyserNode = this.audioContext.createAnalyser();
       this.analyserNode.fftSize = 256;
       source.connect(this.analyserNode);
 
-      // 启动可视化
       this._startVisualization();
 
-      // 启动 MediaRecorder
-      const mimeType = this._getSupportedMimeType();
-      console.log(`[音频] 使用编码格式: ${mimeType}`);
-
-      this.mediaRecorder = new MediaRecorder(this.stream, {
-        mimeType: mimeType,
-        audioBitsPerSecond: 64000,
-      });
-
-      let audioChunks = [];
-
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunks.push(event.data);
-        }
-      };
-
-      this.mediaRecorder.onstop = () => {
-        if (audioChunks.length > 0) {
-          const audioBlob = new Blob(audioChunks, { type: mimeType });
-          audioChunks = [];
-
-          if (this.onAudioChunk) {
-            this.onAudioChunk(audioBlob);
-          }
-        }
-      };
-
-      // 使用 timeslice 参数让 MediaRecorder 按间隔产生数据块
-      // 避免手动 stop/start 导致的音频间隙
-      try {
-        this.mediaRecorder.start(this.chunkInterval);
-      } catch (e) {
-        // 如果浏览器不支持 timeslice 参数，回退到手动模式
-        console.warn("[音频] timeslice 模式不支持，回退到手动分段");
-        this.mediaRecorder.start();
-        this.intervalId = setInterval(() => {
-          if (this.mediaRecorder && this.mediaRecorder.state === "recording") {
-            this.mediaRecorder.stop();
-            audioChunks = [];
-            try {
-              this.mediaRecorder.start(this.chunkInterval);
-            } catch {
-              this.mediaRecorder.start();
-            }
-          }
-        }, this.chunkInterval);
-      }
+      // 启动 Web Speech API
+      this._startRecognition();
 
       this.isCapturing = true;
-      console.log("[音频] 音频捕获已启动");
+      console.log(`[语音] Web Speech API 已启动 (${this.currentLang})`);
       return true;
     } catch (error) {
-      console.error("[音频] 启动失败:", error);
-
+      console.error("[语音] 启动失败:", error);
       if (error.name === "NotAllowedError") {
-        alert("麦克风权限被拒绝，请在浏览器设置中允许麦克风访问");
+        if (this.onError) this.onError("麦克风权限被拒绝");
       } else if (error.name === "NotFoundError") {
-        alert("未检测到麦克风设备，请连接麦克风后重试");
-      } else if (error.name === "NotReadableError") {
-        alert("麦克风被其他应用占用，请关闭其他录音程序后重试");
+        if (this.onError) this.onError("未检测到麦克风");
       }
-
       return false;
     }
   }
 
   /**
-   * 停止音频捕获
+   * 启动/重启 SpeechRecognition
    */
-  stop() {
+  _startRecognition() {
+    if (this.isListening) return;
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    this.recognition = new SpeechRecognition();
+
+    this.recognition.lang = this.currentLang;
+    this.recognition.continuous = true;    // 持续识别
+    this.recognition.interimResults = true; // 返回中间结果
+    this.recognition.maxAlternatives = 1;
+
+    this.recognition.onresult = (event) => {
+      let interimText = "";
+      let finalText = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalText += result[0].transcript;
+        } else {
+          interimText += result[0].transcript;
+        }
+      }
+
+      // 发送中间结果 (用于实时显示)
+      if (interimText && this.onInterimResult) {
+        this.onInterimResult(interimText.trim());
+      }
+
+      // 发送最终结果 (用于翻译)
+      if (finalText) {
+        const trimmed = finalText.trim();
+        // 去重: 避免发送重复的短片段
+        if (trimmed && trimmed !== this.lastFinalText) {
+          this.lastFinalText = trimmed;
+          if (this.onResult) {
+            this.onResult(trimmed);
+          }
+        }
+      }
+    };
+
+    this.recognition.onerror = (event) => {
+      console.warn(`[语音] 识别错误: ${event.error}`);
+
+      // 处理常见错误，自动恢复
+      if (event.error === "no-speech" || event.error === "aborted") {
+        // 静默重启
+        this._scheduleRestart();
+      } else if (event.error === "not-allowed") {
+        if (this.onError) this.onError("语音识别被阻止，请允许麦克风权限");
+      } else {
+        this._scheduleRestart();
+      }
+    };
+
+    this.recognition.onend = () => {
+      this.isListening = false;
+      // 如果还在运行状态，自动重启
+      if (this.isCapturing) {
+        this._scheduleRestart();
+      }
+    };
+
+    try {
+      this.recognition.start();
+      this.isListening = true;
+      console.log("[语音] SpeechRecognition 已启动");
+    } catch (error) {
+      console.error("[语音] 启动识别失败:", error);
+      this._scheduleRestart();
+    }
+  }
+
+  /**
+   * 安排重启 (识别断开后自动恢复)
+   */
+  _scheduleRestart() {
+    if (this.restartTimeout) clearTimeout(this.restartTimeout);
     if (!this.isCapturing) return;
 
-    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
-      this.mediaRecorder.stop();
+    this.restartTimeout = setTimeout(() => {
+      if (this.isCapturing && !this.isListening) {
+        console.log("[语音] 自动重启识别...");
+        this._startRecognition();
+      }
+    }, 300);
+  }
+
+  /**
+   * 停止语音识别
+   */
+  stop() {
+    this.isCapturing = false;
+
+    if (this.restartTimeout) {
+      clearTimeout(this.restartTimeout);
+      this.restartTimeout = null;
     }
 
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+    if (this.recognition) {
+      try {
+        this.recognition.stop();
+      } catch (e) { /* ignore */ }
+      this.recognition = null;
     }
 
+    this.isListening = false;
+
+    // 停止可视化
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
@@ -147,56 +216,50 @@ class AudioCapture {
     }
 
     if (this.stream) {
-      this.stream.getTracks().forEach((track) => track.stop());
+      this.stream.getTracks().forEach((t) => t.stop());
       this.stream = null;
     }
 
-    this.isCapturing = false;
-    this.mediaRecorder = null;
-    console.log("[音频] 音频捕获已停止");
+    this.lastFinalText = "";
+    console.log("[语音] 已停止");
   }
 
   /**
-   * 获取支持的音频 MIME 类型
-   */
-  _getSupportedMimeType() {
-    const types = [
-      "audio/webm;codecs=opus",
-      "audio/webm",
-      "audio/ogg;codecs=opus",
-      "audio/mp4",
-    ];
-
-    for (const type of types) {
-      if (MediaRecorder.isTypeSupported(type)) {
-        return type;
-      }
-    }
-
-    return "";
-  }
-
-  /**
-   * 启动音频可视化循环
+   * 音频可视化循环
    */
   _startVisualization() {
     const draw = () => {
       if (!this.analyserNode) return;
-
-      const bufferLength = this.analyserNode.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      this.analyserNode.getByteFrequencyData(dataArray);
-
-      if (this.onVisualizationData) {
-        this.onVisualizationData(dataArray);
-      }
-
+      const data = new Uint8Array(this.analyserNode.frequencyBinCount);
+      this.analyserNode.getByteFrequencyData(data);
+      if (this.onVisualizationData) this.onVisualizationData(data);
       this.animationId = requestAnimationFrame(draw);
     };
-
     draw();
+  }
+
+  /**
+   * 更新识别语言 (运行时切换)
+   */
+  setLanguage(langCode) {
+    this.currentLang = this.langMap[langCode] || "en-US";
+    if (this.isCapturing && this.isListening) {
+      // 重启识别以应用新语言
+      if (this.recognition) {
+        try { this.recognition.stop(); } catch (e) { /* ignore */ }
+      }
+      this.isListening = false;
+      setTimeout(() => this._startRecognition(), 200);
+    }
+  }
+
+  _isSupported() {
+    return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  }
+
+  static isSupported() {
+    return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   }
 }
 
-// 导出全局对象
-window.AudioCapture = AudioCapture;
+window.SpeechCapture = SpeechCapture;

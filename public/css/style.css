@@ -396,3 +396,19 @@ body {
   .header-content { height: auto; padding: 12px 0; flex-direction: column; gap: 8px; }
   .subtitle-panel { max-height: 300px; }
 }
+/* 中间识别结果 (浏览器STT实时显示) */
+.interim-text {
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(79, 70, 229, 0.08);
+  border: 1px dashed var(--primary);
+  font-size: 14px;
+  color: var(--primary);
+  animation: interimPulse 1.5s ease-in-out infinite;
+  line-height: 1.5;
+}
+
+@keyframes interimPulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}

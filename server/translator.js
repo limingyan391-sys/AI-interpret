@@ -1,21 +1,22 @@
 ﻿// server/translator.js
-// AI同声传译 - 翻译模块 (增强版修正机制)
-// 使用 OpenAI GPT 模型进行上下文感知翻译
-// 具备智能修正检测: 编辑距离、子串匹配、时序分析
+// AI同声传译 - 翻译模块
+// 支持 DeepSeek / OpenAI 双模式 (API格式兼容)
 // 依赖: openai (https://www.npmjs.com/package/openai)
+// DeepSeek API: https://platform.deepseek.com/api-docs
 
 const OpenAI = require("openai");
 const config = require("./config");
 
 class Translator {
   constructor() {
-    if (!config.openai.apiKey || config.openai.apiKey === "sk-your-api-key-here") {
-      console.error("[翻译] 错误: 未配置 OPENAI_API_KEY");
+    if (!config.hasApiKey()) {
+      console.error("[翻译] 错误: 未配置 API Key");
+      console.error("[翻译] 使用 DeepSeek: 在 .env 中设置 OPENAI_API_KEY 和 OPENAI_BASE_URL");
     }
 
     this.client = new OpenAI({
-      apiKey: config.openai.apiKey,
-      baseURL: config.openai.baseURL,
+      apiKey: config.llm.apiKey,
+      baseURL: config.llm.baseURL,
     });
 
     this.model = config.translation.model;
@@ -26,6 +27,10 @@ class Translator {
     this.history = [];
     this.allSegments = [];
     this.segmentIdCounter = 0;
+
+    const mode = config.getMode();
+    console.log(`[翻译] 模型: ${this.model} (${mode === "deepseek" ? "DeepSeek" : mode === "openai" ? "OpenAI" : "未配置"})`);
+    console.log(`[翻译] API: ${config.llm.baseURL}`);
   }
 
   _buildSystemPrompt() {
@@ -46,7 +51,7 @@ class Translator {
       "2. 保持原意，使用自然的目标语言表达",
       "3. 如果原文不完整（如句子中途截断），根据上下文合理推断",
       "4. 专业术语保持一致性",
-      `5. 只输出翻译结果，不加引号或原文`,
+      "5. 只输出翻译结果，不加引号或原文",
       "6. 无法识别时输出: [无法识别]",
       "",
       "修正意识:",
@@ -57,6 +62,9 @@ class Translator {
 
   /**
    * 翻译文本，带回溯修正检测
+   * @param {string} text - 待翻译文本
+   * @param {object} meta - { segmentId, timestamp }
+   * @returns {Promise<object>}
    */
   async translate(text, meta = {}) {
     if (!text || text.trim().length === 0) {
@@ -67,14 +75,12 @@ class Translator {
     const timestamp = meta.timestamp || Date.now();
 
     try {
-      // 修正检测: 检查当前文本是否是对历史片段的修正
       const correctionInfo = this._detectCorrections(text, segmentId);
 
       const messages = [
         { role: "system", content: this._buildSystemPrompt() },
       ];
 
-      // 添加上下文历史
       const recentHistory = this.history.slice(-this.contextWindowSize);
       for (const item of recentHistory) {
         messages.push({ role: "user", content: `原文: ${item.originalText}` });
@@ -92,7 +98,6 @@ class Translator {
 
       const translatedText = response.choices[0]?.message?.content?.trim() || "";
 
-      // 记录历史
       this.history.push({
         segmentId,
         originalText: text,
@@ -100,12 +105,7 @@ class Translator {
         timestamp,
         isCorrection: correctionInfo.hasCorrection,
       });
-      this.allSegments.push({
-        segmentId,
-        originalText: text,
-        translatedText,
-        timestamp,
-      });
+      this.allSegments.push({ segmentId, originalText: text, translatedText, timestamp });
 
       return {
         translatedText,
@@ -127,10 +127,6 @@ class Translator {
 
   /**
    * 智能修正检测
-   * 策略：
-   * 1. 编辑距离分析 - 文本高度重叠但不同
-   * 2. 前缀/后缀匹配 - 新文本扩展或修正了旧文本
-   * 3. 时序连续性 - 检查最近片段的关系
    */
   _detectCorrections(currentText, currentSegmentId) {
     const corrections = [];
@@ -142,7 +138,7 @@ class Translator {
       const prevText = prev.originalText.toLowerCase();
       const currText = currentText.toLowerCase();
 
-      // 策略1: 编辑距离相似度 (0.3~0.9 表示部分重叠)
+      // 编辑距离相似度
       const similarity = this._levenshteinSimilarity(currText, prevText);
       if (similarity > 0.3 && similarity < 0.95) {
         corrections.push({
@@ -156,7 +152,7 @@ class Translator {
         continue;
       }
 
-      // 策略2: 当前文本包含旧文本的扩展版本
+      // 当前文本扩展了旧文本
       if (currText.includes(prevText) && currText.length > prevText.length * 1.3) {
         corrections.push({
           originalSegmentId: prev.segmentId,
@@ -169,7 +165,7 @@ class Translator {
         continue;
       }
 
-      // 策略3: 旧文本包含当前文本的核心部分 (之前识别是某大段的子串)
+      // 旧文本包含当前文本的精炼
       if (prevText.includes(currText) && prevText.length > currText.length * 1.3) {
         corrections.push({
           originalSegmentId: prev.segmentId,
@@ -182,38 +178,28 @@ class Translator {
       }
     }
 
-    return {
-      hasCorrection: corrections.length > 0,
-      corrections,
-    };
+    return { hasCorrection: corrections.length > 0, corrections };
   }
 
-  /**
-   * 编辑距离相似度计算 (Levenshtein)
-   */
   _levenshteinSimilarity(a, b) {
     if (a === b) return 1;
-    if (a.length === 0) return 0;
-    if (b.length === 0) return 0;
+    if (a.length === 0 || b.length === 0) return 0;
 
-    const matrix = [];
-    for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+    const matrix = Array.from({ length: b.length + 1 }, (_, i) => [i]);
     for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
 
     for (let i = 1; i <= b.length; i++) {
       for (let j = 1; j <= a.length; j++) {
-        const cost = a[j - 1] === b[i - 1] ? 0 : 1;
         matrix[i][j] = Math.min(
           matrix[i - 1][j] + 1,
           matrix[i][j - 1] + 1,
-          matrix[i - 1][j - 1] + cost
+          matrix[i - 1][j - 1] + (a[j - 1] === b[i - 1] ? 0 : 1)
         );
       }
     }
 
-    const distance = matrix[b.length][a.length];
     const maxLen = Math.max(a.length, b.length);
-    return 1 - distance / maxLen;
+    return 1 - matrix[b.length][a.length] / maxLen;
   }
 
   reset() {

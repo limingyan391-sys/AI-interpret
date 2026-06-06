@@ -7,7 +7,6 @@
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
-  <!-- 顶部导航 -->
   <header class="header">
     <div class="header-content">
       <h1 class="title">🎙️ AI 同声传译助手</h1>
@@ -18,9 +17,7 @@
     </div>
   </header>
 
-  <!-- 主操作区 -->
   <main class="main-container">
-    <!-- 控制面板 -->
     <section class="control-panel">
       <button class="btn btn-record" id="btnRecord" disabled>
         <span class="btn-icon">🎤</span>
@@ -58,12 +55,10 @@
       </div>
     </section>
 
-    <!-- 字幕显示区 -->
     <section class="subtitle-area">
-      <!-- 原文显示 -->
       <div class="subtitle-panel original-panel">
         <div class="panel-header">
-          <h3>🔊 源语言识别</h3>
+          <h3>🔊 语音识别</h3>
           <span class="panel-badge" id="sttBadge">等待输入...</span>
         </div>
         <div class="subtitle-content" id="originalContent">
@@ -71,7 +66,6 @@
         </div>
       </div>
 
-      <!-- 翻译结果 -->
       <div class="subtitle-panel translation-panel">
         <div class="panel-header">
           <h3>🌐 实时翻译</h3>
@@ -82,27 +76,31 @@
         </div>
       </div>
 
-      <!-- 修正通知区 -->
       <div class="correction-panel" id="correctionPanel" style="display:none;">
         <div class="panel-header">
           <h3>🔄 修正记录</h3>
-          <span style="font-size:12px;color:var(--text-secondary);">系统自动检测并修正识别/翻译错误</span>
+          <span style="font-size:12px;color:var(--text-secondary);">自动修正识别/翻译错误</span>
         </div>
         <div class="correction-list" id="correctionList"></div>
       </div>
     </section>
 
-    <!-- 音频可视化 -->
     <section class="visualizer-section">
       <canvas id="audioVisualizer"></canvas>
     </section>
   </main>
 
-  <!-- 连接配置弹窗 -->
   <div class="modal-overlay" id="connectModal">
     <div class="modal">
       <h2>🔌 连接到服务</h2>
-      <p>请确认后端服务正在运行。<br>首次使用请参考 README.md 进行配置。</p>
+      <p>
+        语音识别使用浏览器内置能力（无需 API Key），翻译调用后端 API。<br><br>
+        <strong>DeepSeek 配置：</strong><br>
+        在 <code>.env</code> 中设置：<br>
+        <code>OPENAI_API_KEY=sk-你的Key</code><br>
+        <code>OPENAI_BASE_URL=https://api.deepseek.com/v1</code><br>
+        <code>TRANSLATION_MODEL=deepseek-chat</code>
+      </p>
       <div class="form-group">
         <label for="serverUrl">服务器地址</label>
         <input type="text" id="serverUrl" value="ws://localhost:3000" />
@@ -111,13 +109,12 @@
         <button class="btn btn-primary" id="btnConnect">连接</button>
       </div>
       <p class="hint">
-        💡 运行 <code>npm run demo</code> 可启动演示模式（无需 API Key）<br>
-        💡 运行 <code>npm start</code> 启动生产模式（需配置 API Key）
+        💡 <code>npm run demo</code> — 演示模式（无需 Key）<br>
+        💡 <code>npm start</code> — 生产模式（需配置 Key）
       </p>
     </div>
   </div>
 
-  <!-- 脚本 -->
   <script src="/js/audio.js"></script>
   <script src="/js/subtitles.js"></script>
   <script src="/js/app.js"></script>
