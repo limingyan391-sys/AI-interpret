@@ -1,7 +1,12 @@
 ﻿// server/websocket.js
-// AI同声传译 - WebSocket 通信模块 (增强修正事件)
-// 管理客户端连接、音频流接收和结果推送
-// 依赖: ws (https://www.npmjs.com/package/ws)
+// AI同声传译 - WebSocket 通信模块
+// 支持 browser STT 模式 (接收文本) 和 whisper 模式 (接收音频)
+//
+// browser 模式数据流:
+//   浏览器: Web Speech API → text → stt_result → 服务端 → DeepSeek → translation
+//
+// whisper 模式数据流:
+//   浏览器: MediaRecorder → audio → audio_chunk → 服务端 → Whisper → DeepSeek → translation
 
 const WebSocket = require("ws");
 const config = require("./config");
@@ -11,14 +16,12 @@ class WebSocketManager {
     this.stt = stt;
     this.translator = translator;
 
-    this.wss = new WebSocket.Server({
-      server,
-      maxPayload: config.server.wsMaxPayload,
-    });
-
+    this.wss = new WebSocket.Server({ server });
     this.clients = new Map();
+
     this._setupHandlers();
     console.log("[WebSocket] 服务已启动");
+    console.log(`[WebSocket] STT引擎: ${config.sttEngine}`);
   }
 
   _setupHandlers() {
@@ -31,10 +34,10 @@ class WebSocketManager {
         audioBuffer: Buffer.alloc(0),
         isProcessing: false,
         lastProcessTime: Date.now(),
-        pendingSegments: [],
         config: {
-          sourceLang: config.stt.language,
+          sourceLang: config.translation.sourceLang,
           targetLang: config.translation.targetLang,
+          sttEngine: config.sttEngine,
         },
       };
       this.clients.set(ws, clientState);
@@ -43,29 +46,26 @@ class WebSocketManager {
         try {
           await this._handleMessage(ws, data, clientState);
         } catch (error) {
-          console.error(`[WebSocket] 消息处理错误 [${clientId}]:`, error.message);
-          this._sendToClient(ws, {
-            type: "error",
-            message: "处理出错: " + error.message,
-          });
+          console.error(`[WS] 处理错误 [${clientId}]:`, error.message);
+          this._send(ws, { type: "error", message: "处理出错" });
         }
       });
 
       ws.on("close", () => {
-        console.log(`[WebSocket] 客户端断开: ${clientId}`);
+        console.log(`[WebSocket] 断开: ${clientId}`);
         this.clients.delete(ws);
       });
 
       ws.on("error", (error) => {
-        console.error(`[WebSocket] 连接错误 [${clientId}]:`, error.message);
+        console.error(`[WS] 连接错误 [${clientId}]:`, error.message);
         this.clients.delete(ws);
       });
 
-      this._sendToClient(ws, {
+      this._send(ws, {
         type: "connected",
         clientId,
         config: clientState.config,
-        message: "已连接到AI同声传译服务",
+        message: `已连接 (STT: ${config.sttEngine})`,
       });
     });
   }
@@ -75,59 +75,115 @@ class WebSocketManager {
     try {
       message = JSON.parse(data.toString());
     } catch {
-      await this._handleAudioData(ws, data, state);
+      // 非 JSON => 二进制音频 (whisper 模式)
+      if (config.sttEngine === "whisper") {
+        await this._handleAudioData(ws, data, state);
+      }
       return;
     }
 
     switch (message.type) {
-      case "audio_config":
-        state.config = { ...state.config, ...message.config };
-        this._sendToClient(ws, { type: "audio_config_ack", config: state.config });
+      case "stt_result":
+        // browser 模式: 浏览器已识别文本，直接翻译
+        await this._handleSttResult(ws, message, state);
         break;
 
       case "audio_chunk":
+        // whisper 模式: 需要服务端做语音识别
         if (message.data) {
           const audioBuffer = Buffer.from(message.data, "base64");
           await this._handleAudioData(ws, audioBuffer, state);
         }
         break;
 
-      case "audio_end":
-        if (state.audioBuffer.length > 0) {
-          await this._processAudioBuffer(ws, state);
-        }
-        this._sendToClient(ws, { type: "audio_end_ack" });
+      case "audio_config":
+        state.config = { ...state.config, ...message.config };
+        this._send(ws, { type: "audio_config_ack", config: state.config });
         break;
 
       case "reset":
         this.translator.reset();
         state.audioBuffer = Buffer.alloc(0);
-        state.pendingSegments = [];
-        this._sendToClient(ws, { type: "reset_ack" });
+        this._send(ws, { type: "reset_ack" });
         console.log("[WebSocket] 会话已重置");
         break;
 
       case "ping":
-        this._sendToClient(ws, { type: "pong" });
+        this._send(ws, { type: "pong" });
         break;
-
-      default:
-        this._sendToClient(ws, {
-          type: "error",
-          message: `未知消息类型: ${message.type}`,
-        });
     }
   }
 
+  /**
+   * browser 模式: 处理前端 Web Speech API 识别结果
+   */
+  async _handleSttResult(ws, message, state) {
+    const text = (message.text || "").trim();
+    if (!text) return;
+
+    // 去重: 忽略与上一条完全相同的文本
+    if (state.lastSttText === text) return;
+    state.lastSttText = text;
+
+    console.log(`[浏览器STT] ${text}`);
+
+    // 发送 STT 中间结果给前端
+    this._send(ws, {
+      type: "partial_stt",
+      text,
+      timestamp: Date.now(),
+    });
+
+    // 调用 stt 模块 (browser 模式仅做校验透传)
+    const sttResult = await this.stt.transcribe(text);
+    if (!sttResult.text) return;
+
+    // 翻译
+    const translationResult = await this.translator.translate(sttResult.text, {
+      timestamp: Date.now(),
+    });
+
+    if (translationResult.translatedText) {
+      console.log(`[翻译] ${translationResult.translatedText}`);
+
+      this._send(ws, {
+        type: "translation",
+        segmentId: translationResult.segmentId,
+        originalText: sttResult.text,
+        translatedText: translationResult.translatedText,
+        isCorrection: translationResult.isCorrection,
+        corrections: translationResult.corrections || [],
+        timestamp: Date.now(),
+      });
+
+      // 发送修正事件
+      if (translationResult.isCorrection && translationResult.corrections) {
+        for (const c of translationResult.corrections) {
+          console.log(`[修正] ${c.originalText} → ${sttResult.text}`);
+          this._send(ws, {
+            type: "correction",
+            originalSegmentId: c.originalSegmentId,
+            originalText: c.originalText,
+            originalTranslation: c.originalTranslation,
+            correctedText: sttResult.text,
+            correctedTranslation: translationResult.translatedText,
+            correctionType: c.type,
+            confidence: c.confidence,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * whisper 模式: 处理音频数据
+   */
   async _handleAudioData(ws, audioBuffer, state) {
     state.audioBuffer = Buffer.concat([state.audioBuffer, audioBuffer]);
 
-    const minChunkSize = 16000;
-    const maxInterval = 3000;
-
-    if (state.audioBuffer.length >= minChunkSize && !state.isProcessing) {
-      const now = Date.now();
-      if (now - state.lastProcessTime >= maxInterval) {
+    if (state.audioBuffer.length >= 16000 && !state.isProcessing) {
+      if (Date.now() - state.lastProcessTime >= 3000) {
         await this._processAudioBuffer(ws, state);
       }
     }
@@ -135,38 +191,29 @@ class WebSocketManager {
 
   async _processAudioBuffer(ws, state) {
     if (state.audioBuffer.length === 0) return;
-
     state.isProcessing = true;
-    const bufferToProcess = state.audioBuffer;
+    const buffer = state.audioBuffer;
     state.audioBuffer = Buffer.alloc(0);
     state.lastProcessTime = Date.now();
 
     try {
-      // 步骤1: 语音识别
-      const sttResult = await this.stt.transcribe(bufferToProcess, "webm");
-
+      const sttResult = await this.stt.transcribe(buffer, "webm");
       if (sttResult.text) {
-        console.log(`[识别] ${sttResult.text}`);
-
-        // 发送识别结果
-        this._sendToClient(ws, {
+        console.log(`[Whisper] ${sttResult.text}`);
+        this._send(ws, {
           type: "partial_stt",
           text: sttResult.text,
           duration: sttResult.duration,
-          isCorrection: sttResult.isCorrection || false,
           timestamp: Date.now(),
         });
 
-        // 步骤2: 翻译 (含修正检测)
         const translationResult = await this.translator.translate(sttResult.text, {
           timestamp: Date.now(),
         });
 
         if (translationResult.translatedText) {
           console.log(`[翻译] ${translationResult.translatedText}`);
-
-          // 发送翻译结果 (包含修正信息)
-          this._sendToClient(ws, {
+          this._send(ws, {
             type: "translation",
             segmentId: translationResult.segmentId,
             originalText: sttResult.text,
@@ -176,19 +223,17 @@ class WebSocketManager {
             timestamp: Date.now(),
           });
 
-          // 如果有修正，发送独立的修正事件 (每条修正一条)
           if (translationResult.isCorrection && translationResult.corrections) {
-            for (const correction of translationResult.corrections) {
-              console.log(`[修正] ${correction.originalText} → ${sttResult.text}`);
-              this._sendToClient(ws, {
+            for (const c of translationResult.corrections) {
+              this._send(ws, {
                 type: "correction",
-                originalSegmentId: correction.originalSegmentId,
-                originalText: correction.originalText,
-                originalTranslation: correction.originalTranslation,
+                originalSegmentId: c.originalSegmentId,
+                originalText: c.originalText,
+                originalTranslation: c.originalTranslation,
                 correctedText: sttResult.text,
                 correctedTranslation: translationResult.translatedText,
-                correctionType: correction.type || "rephrase",
-                confidence: correction.confidence || 80,
+                correctionType: c.type,
+                confidence: c.confidence,
                 timestamp: Date.now(),
               });
             }
@@ -196,25 +241,16 @@ class WebSocketManager {
         }
       }
     } catch (error) {
-      console.error("[处理] 音频处理错误:", error.message);
+      console.error("[处理] 错误:", error.message);
     } finally {
       state.isProcessing = false;
     }
   }
 
-  _sendToClient(ws, data) {
+  _send(ws, data) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(data));
     }
-  }
-
-  broadcast(data) {
-    const message = JSON.stringify(data);
-    this.wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(message);
-      }
-    });
   }
 }
 
