@@ -202,6 +202,23 @@ class Translator {
     return 1 - matrix[b.length][a.length] / maxLen;
   }
 
+
+  /**
+   * 动态更新源语言
+   */
+  setSourceLang(lang) {
+    this.sourceLang = lang;
+    console.log(`[翻译] 源语言切换为: ${lang}`);
+  }
+
+  /**
+   * 动态更新目标语言
+   */
+  setTargetLang(lang) {
+    this.targetLang = lang;
+    console.log(`[翻译] 目标语言切换为: ${lang}`);
+  }
+
   reset() {
     this.history = [];
     this.allSegments = [];
@@ -210,3 +227,4 @@ class Translator {
 }
 
 module.exports = Translator;
+
