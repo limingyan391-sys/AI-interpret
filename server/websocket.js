@@ -1,5 +1,5 @@
 ﻿// server/websocket.js
-// AI同声传译 - WebSocket 通信模块
+// AI同声传译 - WebSocket 通信模块 (增强修正事件)
 // 管理客户端连接、音频流接收和结果推送
 // 依赖: ws (https://www.npmjs.com/package/ws)
 
@@ -16,9 +16,7 @@ class WebSocketManager {
       maxPayload: config.server.wsMaxPayload,
     });
 
-    // 存储所有活跃连接及音频缓冲区
     this.clients = new Map();
-
     this._setupHandlers();
     console.log("[WebSocket] 服务已启动");
   }
@@ -26,9 +24,8 @@ class WebSocketManager {
   _setupHandlers() {
     this.wss.on("connection", (ws, req) => {
       const clientId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      console.log(`[WebSocket] 客户端连接: ${clientId} (${req.socket.remoteAddress})`);
+      console.log(`[WebSocket] 客户端连接: ${clientId}`);
 
-      // 每个连接的音频缓冲区
       const clientState = {
         id: clientId,
         audioBuffer: Buffer.alloc(0),
@@ -64,7 +61,6 @@ class WebSocketManager {
         this.clients.delete(ws);
       });
 
-      // 发送连接确认和配置信息
       this._sendToClient(ws, {
         type: "connected",
         clientId,
@@ -75,29 +71,21 @@ class WebSocketManager {
   }
 
   async _handleMessage(ws, data, state) {
-    // 尝试解析为JSON (控制消息)
     let message;
     try {
       message = JSON.parse(data.toString());
     } catch {
-      // 不是JSON => 视为二进制音频数据
       await this._handleAudioData(ws, data, state);
       return;
     }
 
-    // 处理控制消息
     switch (message.type) {
       case "audio_config":
-        // 配置音频参数
         state.config = { ...state.config, ...message.config };
-        this._sendToClient(ws, {
-          type: "audio_config_ack",
-          config: state.config,
-        });
+        this._sendToClient(ws, { type: "audio_config_ack", config: state.config });
         break;
 
       case "audio_chunk":
-        // 音频数据块 (base64编码)
         if (message.data) {
           const audioBuffer = Buffer.from(message.data, "base64");
           await this._handleAudioData(ws, audioBuffer, state);
@@ -105,7 +93,6 @@ class WebSocketManager {
         break;
 
       case "audio_end":
-        // 音频流结束 - 处理剩余缓冲区
         if (state.audioBuffer.length > 0) {
           await this._processAudioBuffer(ws, state);
         }
@@ -113,11 +100,11 @@ class WebSocketManager {
         break;
 
       case "reset":
-        // 重置翻译上下文
         this.translator.reset();
         state.audioBuffer = Buffer.alloc(0);
         state.pendingSegments = [];
         this._sendToClient(ws, { type: "reset_ack" });
+        console.log("[WebSocket] 会话已重置");
         break;
 
       case "ping":
@@ -133,17 +120,12 @@ class WebSocketManager {
   }
 
   async _handleAudioData(ws, audioBuffer, state) {
-    // 累积音频数据
     state.audioBuffer = Buffer.concat([state.audioBuffer, audioBuffer]);
 
-    // 如果缓冲区足够大或距离上次处理超过一定时间，触发处理
-    const minChunkSize = 16000; // ~1秒的16kHz音频
-    const maxInterval = 3000; // 最大间隔3秒
+    const minChunkSize = 16000;
+    const maxInterval = 3000;
 
-    if (
-      state.audioBuffer.length >= minChunkSize &&
-      !state.isProcessing
-    ) {
+    if (state.audioBuffer.length >= minChunkSize && !state.isProcessing) {
       const now = Date.now();
       if (now - state.lastProcessTime >= maxInterval) {
         await this._processAudioBuffer(ws, state);
@@ -166,15 +148,16 @@ class WebSocketManager {
       if (sttResult.text) {
         console.log(`[识别] ${sttResult.text}`);
 
-        // 向客户端发送部分识别结果
+        // 发送识别结果
         this._sendToClient(ws, {
           type: "partial_stt",
           text: sttResult.text,
           duration: sttResult.duration,
+          isCorrection: sttResult.isCorrection || false,
           timestamp: Date.now(),
         });
 
-        // 步骤2: 翻译
+        // 步骤2: 翻译 (含修正检测)
         const translationResult = await this.translator.translate(sttResult.text, {
           timestamp: Date.now(),
         });
@@ -182,25 +165,30 @@ class WebSocketManager {
         if (translationResult.translatedText) {
           console.log(`[翻译] ${translationResult.translatedText}`);
 
-          // 发送翻译结果
+          // 发送翻译结果 (包含修正信息)
           this._sendToClient(ws, {
             type: "translation",
             segmentId: translationResult.segmentId,
             originalText: sttResult.text,
             translatedText: translationResult.translatedText,
             isCorrection: translationResult.isCorrection,
+            corrections: translationResult.corrections || [],
             timestamp: Date.now(),
           });
 
-          // 如果有修正，发送修正通知
+          // 如果有修正，发送独立的修正事件 (每条修正一条)
           if (translationResult.isCorrection && translationResult.corrections) {
             for (const correction of translationResult.corrections) {
+              console.log(`[修正] ${correction.originalText} → ${sttResult.text}`);
               this._sendToClient(ws, {
                 type: "correction",
                 originalSegmentId: correction.originalSegmentId,
                 originalText: correction.originalText,
                 originalTranslation: correction.originalTranslation,
+                correctedText: sttResult.text,
                 correctedTranslation: translationResult.translatedText,
+                correctionType: correction.type || "rephrase",
+                confidence: correction.confidence || 80,
                 timestamp: Date.now(),
               });
             }
@@ -220,9 +208,6 @@ class WebSocketManager {
     }
   }
 
-  /**
-   * 广播给所有连接的客户端
-   */
   broadcast(data) {
     const message = JSON.stringify(data);
     this.wss.clients.forEach((client) => {

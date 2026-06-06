@@ -1,7 +1,7 @@
 ﻿// server/translator.js
-// AI同声传译 - 翻译模块
-// 使用 OpenAI GPT 模型将识别文本翻译为目标语言
-// 具备上下文修正能力: 当新的识别结果修正了之前的错误时，更新历史记录
+// AI同声传译 - 翻译模块 (增强版修正机制)
+// 使用 OpenAI GPT 模型进行上下文感知翻译
+// 具备智能修正检测: 编辑距离、子串匹配、时序分析
 // 依赖: openai (https://www.npmjs.com/package/openai)
 
 const OpenAI = require("openai");
@@ -23,26 +23,15 @@ class Translator {
     this.targetLang = config.translation.targetLang;
     this.contextWindowSize = config.translation.contextWindowSize;
 
-    // 历史记录: 存储最近的翻译上下文
     this.history = [];
-    // 所有片段记录 (用于修正输出)
     this.allSegments = [];
-    // 片段ID计数器
     this.segmentIdCounter = 0;
   }
 
-  /**
-   * 构建翻译系统提示词
-   */
   _buildSystemPrompt() {
     const langNames = {
-      en: "英语",
-      zh: "中文",
-      ja: "日语",
-      ko: "韩语",
-      fr: "法语",
-      de: "德语",
-      es: "西班牙语",
+      en: "英语", zh: "中文", ja: "日语", ko: "韩语",
+      fr: "法语", de: "德语", es: "西班牙语",
     };
 
     const sourceName = langNames[this.sourceLang] || this.sourceLang;
@@ -50,80 +39,73 @@ class Translator {
 
     return [
       "你是一个专业的实时同声传译系统。",
-      "你的任务是将输入的文本实时翻译成目标语言，输出要自然流畅。",
+      "将输入文本实时翻译成目标语言，输出自然流畅。",
       "",
       "核心要求:",
       `1. 将${sourceName}翻译成${targetName}`,
-      "2. 保持原意的同时使用自然的目标语言表达",
-      "3. 如果原文不完整（如句子中间截断），根据上下文合理推测完整含义",
-      "4. 专业术语要保持一致",
-      `5. 输出格式: 只输出翻译结果，不要包含原文，不要加引号`,
-      `6. 如果输入无法确定含义则输出: [无法识别]`,
+      "2. 保持原意，使用自然的目标语言表达",
+      "3. 如果原文不完整（如句子中途截断），根据上下文合理推断",
+      "4. 专业术语保持一致性",
+      `5. 只输出翻译结果，不加引号或原文`,
+      "6. 无法识别时输出: [无法识别]",
       "",
-      "修正能力:",
-      "- 如果新的输入修正了之前的识别错误，在翻译中体现修正",
-      "- 对于之前不完整的句子，在上下文中补全",
+      "修正意识:",
+      "- 如果新输入修正了之前的识别错误，在翻译中体现",
+      "- 对之前不完整的句子，在上下文中补全含义",
     ].join("\n");
   }
 
   /**
-   * 翻译文本，并记录上下文用于修正
-   * @param {string} text - 待翻译文本
-   * @param {object} meta - 元数据 { segmentId, timestamp, isCorrection }
-   * @returns {Promise<{translatedText: string, segmentId: number, isCorrection: boolean}>}
+   * 翻译文本，带回溯修正检测
    */
   async translate(text, meta = {}) {
     if (!text || text.trim().length === 0) {
-      return { translatedText: "", segmentId: -1, isCorrection: false };
+      return { translatedText: "", segmentId: -1, isCorrection: false, corrections: [] };
     }
 
     const segmentId = meta.segmentId || ++this.segmentIdCounter;
     const timestamp = meta.timestamp || Date.now();
 
     try {
-      // 构建消息列表: 系统提示 + 历史上下文 + 当前输入
+      // 修正检测: 检查当前文本是否是对历史片段的修正
+      const correctionInfo = this._detectCorrections(text, segmentId);
+
       const messages = [
         { role: "system", content: this._buildSystemPrompt() },
       ];
 
-      // 添加上下文历史 (最近的N条)
+      // 添加上下文历史
       const recentHistory = this.history.slice(-this.contextWindowSize);
       for (const item of recentHistory) {
-        messages.push({
-          role: "user",
-          content: `原文: ${item.originalText}`,
-        });
-        messages.push({
-          role: "assistant",
-          content: item.translatedText,
-        });
+        messages.push({ role: "user", content: `原文: ${item.originalText}` });
+        messages.push({ role: "assistant", content: item.translatedText });
       }
 
-      // 添加当前输入
       messages.push({ role: "user", content: `原文: ${text}` });
 
       const response = await this.client.chat.completions.create({
         model: this.model,
-        messages: messages,
+        messages,
         temperature: 0.3,
         max_tokens: 200,
       });
 
       const translatedText = response.choices[0]?.message?.content?.trim() || "";
 
-      // 记录到历史
-      const historyEntry = {
+      // 记录历史
+      this.history.push({
         segmentId,
         originalText: text,
         translatedText,
         timestamp,
-        isCorrection: meta.isCorrection || false,
-      };
-      this.history.push(historyEntry);
-      this.allSegments.push(historyEntry);
-
-      // 检查是否是对之前片段的修正
-      const correctionInfo = this._checkAndGetCorrections(text, segmentId);
+        isCorrection: correctionInfo.hasCorrection,
+      });
+      this.allSegments.push({
+        segmentId,
+        originalText: text,
+        translatedText,
+        timestamp,
+      });
 
       return {
         translatedText,
@@ -133,41 +115,69 @@ class Translator {
       };
     } catch (error) {
       console.error("[翻译] 错误:", error.message);
-
-      if (error.status === 401) {
-        console.error("[翻译] API Key 无效，请检查配置");
-      }
-
+      if (error.status === 401) console.error("[翻译] API Key 无效");
       return {
         translatedText: `[翻译失败: ${error.message}]`,
         segmentId,
         isCorrection: false,
+        corrections: [],
       };
     }
   }
 
   /**
-   * 检查当前翻译是否修正了之前的内容
-   * 基于文本相似度和上下文连续性进行检测
+   * 智能修正检测
+   * 策略：
+   * 1. 编辑距离分析 - 文本高度重叠但不同
+   * 2. 前缀/后缀匹配 - 新文本扩展或修正了旧文本
+   * 3. 时序连续性 - 检查最近片段的关系
    */
-  _checkAndGetCorrections(currentText, currentSegmentId) {
+  _detectCorrections(currentText, currentSegmentId) {
     const corrections = [];
-
-    // 检查最近的N条历史，看是否有文本相似但不同的情况
-    const recentSegments = this.allSegments
-      .filter((s) => s.segmentId !== currentSegmentId)
-      .slice(-5);
+    const recentSegments = this.allSegments.filter(
+      (s) => s.segmentId !== currentSegmentId
+    ).slice(-5);
 
     for (const prev of recentSegments) {
-      // 简单的修正检测：如果当前文本包含对之前文本的明显修正
-      const similarity = this._textSimilarity(currentText, prev.originalText);
-      if (similarity > 0.3 && similarity < 0.9) {
-        // 部分重叠但不同 - 可能是修正
+      const prevText = prev.originalText.toLowerCase();
+      const currText = currentText.toLowerCase();
+
+      // 策略1: 编辑距离相似度 (0.3~0.9 表示部分重叠)
+      const similarity = this._levenshteinSimilarity(currText, prevText);
+      if (similarity > 0.3 && similarity < 0.95) {
         corrections.push({
           originalSegmentId: prev.segmentId,
           originalText: prev.originalText,
           originalTranslation: prev.translatedText,
           newText: currentText,
+          type: "rephrase",
+          confidence: Math.round(similarity * 100),
+        });
+        continue;
+      }
+
+      // 策略2: 当前文本包含旧文本的扩展版本
+      if (currText.includes(prevText) && currText.length > prevText.length * 1.3) {
+        corrections.push({
+          originalSegmentId: prev.segmentId,
+          originalText: prev.originalText,
+          originalTranslation: prev.translatedText,
+          newText: currentText,
+          type: "expansion",
+          confidence: 85,
+        });
+        continue;
+      }
+
+      // 策略3: 旧文本包含当前文本的核心部分 (之前识别是某大段的子串)
+      if (prevText.includes(currText) && prevText.length > currText.length * 1.3) {
+        corrections.push({
+          originalSegmentId: prev.segmentId,
+          originalText: prev.originalText,
+          originalTranslation: prev.translatedText,
+          newText: currentText,
+          type: "refinement",
+          confidence: 75,
         });
       }
     }
@@ -179,19 +189,33 @@ class Translator {
   }
 
   /**
-   * 简单文本相似度计算 (基于词重叠)
+   * 编辑距离相似度计算 (Levenshtein)
    */
-  _textSimilarity(a, b) {
-    const wordsA = new Set(a.toLowerCase().split(/\s+/));
-    const wordsB = new Set(b.toLowerCase().split(/\s+/));
-    const intersection = new Set([...wordsA].filter((w) => wordsB.has(w)));
-    const union = new Set([...wordsA, ...wordsB]);
-    return union.size === 0 ? 0 : intersection.size / union.size;
+  _levenshteinSimilarity(a, b) {
+    if (a === b) return 1;
+    if (a.length === 0) return 0;
+    if (b.length === 0) return 0;
+
+    const matrix = [];
+    for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+    for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+
+    for (let i = 1; i <= b.length; i++) {
+      for (let j = 1; j <= a.length; j++) {
+        const cost = a[j - 1] === b[i - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] + cost
+        );
+      }
+    }
+
+    const distance = matrix[b.length][a.length];
+    const maxLen = Math.max(a.length, b.length);
+    return 1 - distance / maxLen;
   }
 
-  /**
-   * 重置翻译上下文
-   */
   reset() {
     this.history = [];
     this.allSegments = [];
