@@ -5,6 +5,7 @@
 // 启动方式:
 //   npm start          # 生产模式
 //   npm run dev        # 开发模式 (热重载)
+//   npm run demo       # 演示模式 (无需 API Key)
 //
 // 依赖:
 //   express (https://www.npmjs.com/package/express)
@@ -18,9 +19,6 @@ const path = require("path");
 const fs = require("fs");
 
 const config = require("./config");
-const SpeechToText = require("./stt");
-const Translator = require("./translator");
-const WebSocketManager = require("./websocket");
 
 // ====================================
 // 初始化
@@ -37,13 +35,21 @@ if (!fs.existsSync(audioDir)) {
   fs.mkdirSync(audioDir, { recursive: true });
 }
 
-// 检查API Key
-if (!config.openai.apiKey || config.openai.apiKey === "sk-your-api-key-here") {
-  console.warn("⚠  警告: 未配置 OPENAI_API_KEY");
-  console.warn("   请创建 .env 文件并填入你的 OpenAI API Key");
-  console.warn("   参考: .env.example");
-  console.warn("");
+// 判断是否使用模拟模式 (无 API Key 或指定 --demo)
+const useMock = process.argv.includes("--demo") || !config.openai.apiKey || config.openai.apiKey === "sk-your-api-key-here";
+
+let SpeechToText, Translator, MockSTT, MockTranslator;
+
+if (useMock) {
+  console.log("🎯 演示模式: 使用模拟数据 (无需 API Key)");
+  console.log("   如需正式使用，请配置 .env 文件中的 OPENAI_API_KEY\n");
+  ({ MockSTT, MockTranslator } = require("./mock"));
+} else {
+  SpeechToText = require("./stt");
+  Translator = require("./translator");
 }
+
+const WebSocketManager = require("./websocket");
 
 // ====================================
 // 创建服务
@@ -60,19 +66,20 @@ app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
+    mode: useMock ? "demo" : "production",
     config: {
       sttModel: config.stt.model,
       translationModel: config.translation.model,
       sourceLang: config.stt.language,
       targetLang: config.translation.targetLang,
-      apiKeyConfigured: !(!config.openai.apiKey || config.openai.apiKey === "sk-your-api-key-here"),
+      apiKeyConfigured: !useMock,
     },
   });
 });
 
 // 初始化核心模块
-const stt = new SpeechToText();
-const translator = new Translator();
+const stt = useMock ? new MockSTT() : new SpeechToText();
+const translator = useMock ? new MockTranslator() : new Translator();
 
 // 初始化 WebSocket 管理器
 const wsManager = new WebSocketManager(server, stt, translator);
@@ -90,16 +97,15 @@ server.listen(PORT, () => {
   console.log(`   健康检查: http://localhost:${PORT}/api/health`);
   console.log("");
   console.log(`📋 配置:`);
+  console.log(`   模式:          ${useMock ? "🎯 演示模式 (模拟数据)" : "🚀 生产模式"}`);
   console.log(`   语音识别模型:  ${config.stt.model}`);
   console.log(`   翻译模型:      ${config.translation.model}`);
   console.log(`   源语言:        ${config.translation.sourceLang}`);
   console.log(`   目标语言:      ${config.translation.targetLang}`);
   console.log("");
 
-  if (!config.openai.apiKey || config.openai.apiKey === "sk-your-api-key-here") {
-    console.log("⚠  请配置 .env 文件后重启服务以使用翻译功能");
-  } else {
-    console.log("✅ 配置完成，服务就绪！");
+  if (useMock) {
+    console.log("💡 提示: 配置 .env 中的 OPENAI_API_KEY 可使用真实 AI 翻译");
   }
   console.log("");
 });
