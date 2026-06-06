@@ -1,125 +1,25 @@
-﻿# 🎙️ AI 同声传译助手
+PR 5：DeepSeek API 集成 + 浏览器端语音识别
+标题：DeepSeek API integration with browser-based Web Speech API for zero-cost speech recognition
 
-> 通过 AI 能力将实时语音流翻译成中文，以字幕形式呈现，帮助用户跨越语言障碍。
+功能描述（将语音识别从服务端 Whisper API 迁移到浏览器端 Web Speech API，实现零成本的语音识别方案）：
+1.Web Speech API（audio.js 重写）：使用浏览器内置的 SpeechRecognition API，免费、无需 API Key
+2.文本传输：浏览器直接发送识别后的文本（stt_result），不再传输原始音频
+3.DeepSeek 兼容：配置 OPENAI_BASE_URL=https://api.deepseek.com/v1 即可使用 DeepSeek 翻译
+4.三模式自动检测：启动时自动识别 DeepSeek / OpenAI / Demo 模式
+5.实时中间结果：浏览器显示虚线边框的实时语音识别中间结果（讲话时即时出现）
 
-## ✨ 功能特点
+实现思路：
+1.Web Speech API 设置 continuous: true + interimResults: true 实现持续识别
+2.最终结果通过 WebSocket 以 stt_result 消息类型发送文本，不再需要服务端 Whisper 处理
+3.DeepSeek API 与 OpenAI 格式兼容，只需改 baseURL 和 model 名，translator.js 无需改动
+4.config.js 新增 hasApiKey() 和 getMode() 方法，server/index.js 自动检测并显示当前模式
+5.Mock STT 的 transcribe() 方法同时兼容字符串（browser 模式）和 Buffer（whisper 模式）输入
 
-- **实时语音识别**：使用 OpenAI Whisper API 将音频实时转为文字
-- **智能翻译**：使用 GPT 模型将识别结果翻译为目标语言，保持语义自然
-- **上下文修正**：自动检测并修正之前的识别或翻译错误
-- **音频可视化**：实时显示音频频谱
-- **双语字幕**：原文和译文并排展示，方便对照
-- **语言选择**：支持多种源语言和目标语言切换
-
-## 🚀 快速开始
-
-### 前置要求
-
-- [Node.js](https://nodejs.org/) >= 18.0.0
-- [OpenAI API Key](https://platform.openai.com/api-keys)
-- 麦克风设备
-
-### 安装
-
-```bash
-# 1. 克隆项目
-git clone <repo-url>
-cd ai-interpret
-
-# 2. 安装依赖
-npm install
-
-# 3. 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，填入你的 OpenAI API Key
-```
-
-### 运行
-
-```bash
-# 启动后端服务
-npm start
-
-# 开发模式 (带热重载)
-npm run dev
-```
-
-服务启动后，浏览器访问 `http://localhost:3000` 即可使用。
-
-## 🔧 配置说明
-
-编辑 `.env` 文件可配置以下参数：
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `OPENAI_API_KEY` | OpenAI API Key | - |
-| `OPENAI_BASE_URL` | 自定义 API 地址 | https://api.openai.com/v1 |
-| `STT_MODEL` | 语音识别模型 | whisper-1 |
-| `TRANSLATION_MODEL` | 翻译模型 | gpt-4o-mini |
-| `SOURCE_LANG` | 源语言 | en |
-| `TARGET_LANG` | 目标语言 | zh |
-| `PORT` | 服务端口 | 3000 |
-
-## 🏗️ 项目结构
-
-```
-ai-interpret/
-├── server/              # 后端服务
-│   ├── index.js         # 服务入口
-│   ├── config.js        # 配置管理
-│   ├── stt.js           # 语音识别模块 (Whisper API)
-│   ├── translator.js    # 翻译模块 (GPT) + 修正机制
-│   └── websocket.js     # WebSocket 通信管理
-├── public/              # 前端页面
-│   ├── index.html       # 主页面
-│   ├── css/
-│   │   └── style.css    # 界面样式
-│   └── js/
-│       ├── app.js       # 主应用逻辑
-│       ├── audio.js     # 音频捕获模块
-│       └── subtitles.js # 字幕显示模块
-├── .env.example         # 环境变量模板
-├── package.json
-└── README.md
-```
-
-## 🧠 技术架构
-
-### 数据流
-
-```
-麦克风 → MediaRecorder → WebSocket → Whisper STT → GPT 翻译 → WebSocket → 字幕显示
-                                          ↓               ↓
-                                    错误检测 ←—— 上下文窗口 ——→ 修正推送
-```
-
-### 核心模块
-
-1. **音频捕获** (`public/js/audio.js`)
-   - 使用浏览器 `MediaRecorder` API 捕获麦克风音频
-   - 每 3 秒自动分段，通过 WebSocket 发送到后端
-
-2. **语音识别** (`server/stt.js`)
-   - 调用 OpenAI Whisper API 进行语音转文字
-   - 支持多种音频格式 (webm, ogg, mp4)
-
-3. **智能翻译** (`server/translator.js`)
-   - 使用 GPT 模型进行上下文感知翻译
-   - 保留最近对话历史，确保翻译一致性
-   - 自动检测并修正之前的翻译错误
-
-4. **修正机制**
-   - 通过文本相似度比较检测识别差异
-   - 当新识别结果与历史记录部分重叠时触发修正
-   - 前端用高亮动画展示修正前后对比
-
-## 📦 依赖
-
-- [express](https://www.npmjs.com/package/express) - HTTP 服务器
-- [ws](https://www.npmjs.com/package/ws) - WebSocket 通信
-- [openai](https://www.npmjs.com/package/openai) - OpenAI API 客户端
-- [dotenv](https://www.npmjs.com/package/dotenv) - 环境变量管理
-
-## 🤝 贡献
-
-欢迎提交 Issue 或 PR！
+测试方式：
+1.配置 .env：OPENAI_BASE_URL=https://api.deepseek.com/v1 + TRANSLATION_MODEL=deepseek-chat
+2.执行 npm start 启动，确认日志显示 "🚀 DeepSeek 模式"
+3.用 Chrome 浏览器访问，点击「开始录音」
+4.说英语，确认原文面板出现带虚线边框的中间结果（实时显示）
+5.说话停顿后，中间结果变为正式条目并触发翻译
+6.切换目标语言为日语/韩语，再次说话确认翻译语言切换
+7.也可以执行 npm run demo 测试演示模式
