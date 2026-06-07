@@ -1,4 +1,4 @@
-﻿// public/js/subtitles.js
+// public/js/subtitles.js
 // AI同声传译 - 字幕显示模块 (增强修正显示)
 // 管理原文和翻译结果的字幕渲染，支持原位修正更新和修正动画
 
@@ -189,6 +189,116 @@ class SubtitleManager {
     const short = textA.length <= textB.length ? textA : textB;
     const long = textA.length > textB.length ? textA : textB;
     return short.length > long.length * 0.5 && long.includes(short);
+  }
+
+  /**
+   * 导出字幕文件
+   * @param {string} format - "srt" 或 "txt"
+   */
+  exportSubtitles(format = "srt") {
+    const items = this.translationContainer.querySelectorAll(".subtitle-item");
+    if (items.length === 0) {
+      alert("没有可导出的字幕内容");
+      return;
+    }
+
+    let content = "";
+    let filename = "";
+    let mimeType = "text/plain;charset=utf-8";
+    let index = 1;
+
+    for (const item of items) {
+      const timeEl = item.querySelector(".item-time");
+      const textEl = item.querySelector(".item-text");
+      if (!timeEl || !textEl) continue;
+
+      const time = timeEl.textContent;
+      const translated = textEl.textContent;
+
+      // 原文在 📝 提示中，或从 dataset 获取
+      let original = "";
+      const hint = item.querySelector("div[style]");
+      if (hint && hint.textContent.startsWith("📝")) {
+        original = hint.textContent.replace("📝 ", "");
+      }
+
+      if (!original && item.dataset.text) {
+        original = item.dataset.text;
+      }
+
+      if (!translated && !original) continue;
+
+      if (format === "srt") {
+        // SRT 格式
+        const [h, m, s] = time.split(":").map(Number);
+        const startSec = (h || 0) * 3600 + (m || 0) * 60 + (s || 0);
+        const endSec = startSec + 3; // 每条字幕默认3秒
+        const fmtTime = (sec) => {
+          const hh = String(Math.floor(sec / 3600)).padStart(2, "0");
+          const mm = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
+          const ss = String(Math.floor(sec % 60)).padStart(2, "0");
+          return `${hh}:${mm}:${ss},000`;
+        };
+        content += `${index}\n`;
+        content += `${fmtTime(startSec)} --> ${fmtTime(endSec)}\n`;
+        if (original) content += `${original}\n`;
+        content += `${translated}\n\n`;
+        filename = "subtitles.srt";
+      } else {
+        // TXT 格式
+        content += `[${time}]\n`;
+        if (original) content += `原文: ${original}\n`;
+        content += `译文: ${translated}\n\n`;
+        filename = "subtitles.txt";
+      }
+      index++;
+    }
+
+    // 下载文件
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+
+  /**
+   * 下载文件，优先弹出「另存为」对话框
+   */
+  async _downloadFile(content, filename, mimeType) {
+    if (window.showSaveFilePicker) {
+      try {
+        const ext = filename.endsWith(".srt") ? ".srt" : ".txt";
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{
+            description: ext === ".srt" ? "SRT 字幕文件" : "文本文件",
+            accept: { "text/plain": [ext] },
+          }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(content);
+        await writable.close();
+        return;
+      } catch (e) {
+        if (e.name === "AbortError" || e.name === "SecurityError") return;
+        console.warn("[export] showSaveFilePicker 失败，回退到默认下载", e);
+      }
+    }
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   clearAll() {

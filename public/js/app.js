@@ -1,4 +1,4 @@
-﻿// public/js/app.js
+// public/js/app.js
 // AI同声传译 - 主应用逻辑 (Web Speech API + DeepSeek 版 + TTS)
 // 使用浏览器内置语音识别 + 后端翻译 + TTS语音朗读
 
@@ -17,6 +17,8 @@ class InterpretApp {
       btnRecord: document.getElementById("btnRecord"),
       btnReset: document.getElementById("btnReset"),
       btnClear: document.getElementById("btnClear"),
+      btnExport: document.getElementById("btnExport"),
+      exportFormat: document.getElementById("exportFormat"),
       btnConnect: document.getElementById("btnConnect"),
       btnTts: document.getElementById("btnTts"),
       statusIndicator: document.getElementById("statusIndicator"),
@@ -60,6 +62,7 @@ class InterpretApp {
     this.elements.btnRecord.addEventListener("click", () => this.toggleRecording());
     this.elements.btnReset.addEventListener("click", () => this.resetSession());
     this.elements.btnClear.addEventListener("click", () => this.subtitleManager.clearAll());
+    this.elements.btnExport.addEventListener("click", () => this.exportSubtitles());
     this.elements.sourceLang.addEventListener("change", () => this.updateLang());
     this.elements.targetLang.addEventListener("change", () => this.updateLangConfig());
 
