@@ -1,4 +1,4 @@
-﻿// tests/mock.test.js
+// tests/mock.test.js
 // AI同声传译 - Mock 模块单元测试
 
 describe("Mock 模块", () => {
@@ -67,6 +67,26 @@ describe("Mock 模块", () => {
       if (result.isCorrection) {
         expect(result.corrections.length).toBeGreaterThan(0);
       }
+    });
+
+    test("setSourceLang 设置源语言并清空历史", () => {
+      const { MockTranslator } = require("../server/mock");
+      const mt = new MockTranslator();
+      mt.history.push({ segmentId: 1, originalText: "test" });
+      expect(mt.history).toHaveLength(1);
+      mt.setSourceLang("zh");
+      expect(mt.sourceLang).toBe("zh");
+      expect(mt.history).toHaveLength(0);
+    });
+
+    test("setTargetLang 设置目标语言并清空历史", () => {
+      const { MockTranslator } = require("../server/mock");
+      const mt = new MockTranslator();
+      mt.history.push({ segmentId: 1, originalText: "test" });
+      expect(mt.history).toHaveLength(1);
+      mt.setTargetLang("ja");
+      expect(mt.targetLang).toBe("ja");
+      expect(mt.history).toHaveLength(0);
     });
 
     test("重置清空历史和计数器", () => {

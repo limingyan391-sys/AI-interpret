@@ -1,4 +1,4 @@
-﻿// server/mock.js
+// server/mock.js
 // AI同声传译 - 模拟模块 (增强修正检测)
 // 当未配置 API Key 时使用
 
@@ -128,9 +128,25 @@ class MockTranslator {
     };
   }
 
+  setSourceLang(lang) {
+    this.sourceLang = lang;
+    this._clearHistory();
+    console.log(`[模拟翻译] 源语言切换为: ${lang}`);
+  }
+
+  setTargetLang(lang) {
+    this.targetLang = lang;
+    this._clearHistory();
+    console.log(`[模拟翻译] 目标语言切换为: ${lang}`);
+  }
+
   reset() {
-    this.history = [];
+    this._clearHistory();
     this.segmentIdCounter = 0;
+  }
+
+  _clearHistory() {
+    this.history = [];
   }
 }
 

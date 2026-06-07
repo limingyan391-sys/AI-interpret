@@ -459,6 +459,7 @@ body {
   50% { opacity: 1; box-shadow: 0 0 6px rgba(5, 150, 105, 0.3); }
 }
 
+<<<<<<< HEAD
 /* 流式翻译光标闪烁 */
 .subtitle-item.streaming {
   background: var(--primary-light);
@@ -474,4 +475,24 @@ body {
 }
 @keyframes blink-cursor {
   50% { opacity: 0; }
+=======
+/* 导出按钮组 */
+.export-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.export-select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+.export-select:focus {
+  border-color: var(--primary);
+>>>>>>> pr11-export-subtitles
 }

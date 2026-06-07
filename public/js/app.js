@@ -18,6 +18,8 @@ class InterpretApp {
       btnRecord: document.getElementById("btnRecord"),
       btnReset: document.getElementById("btnReset"),
       btnClear: document.getElementById("btnClear"),
+      btnExport: document.getElementById("btnExport"),
+      exportFormat: document.getElementById("exportFormat"),
       btnConnect: document.getElementById("btnConnect"),
       btnTts: document.getElementById("btnTts"),
       statusIndicator: document.getElementById("statusIndicator"),
@@ -61,6 +63,7 @@ class InterpretApp {
     this.elements.btnRecord.addEventListener("click", () => this.toggleRecording());
     this.elements.btnReset.addEventListener("click", () => this.resetSession());
     this.elements.btnClear.addEventListener("click", () => this.subtitleManager.clearAll());
+    this.elements.btnExport.addEventListener("click", () => this.exportSubtitles());
     this.elements.sourceLang.addEventListener("change", () => this.updateLang());
     this.elements.targetLang.addEventListener("change", () => this.updateLangConfig());
 
@@ -286,7 +289,7 @@ class InterpretApp {
 
   // =========== 消息处理 ===========
 
-  // =========== 流式 TTS：按句子边界分段朗读 ===========
+  // == 流式 TTS：按句子边界分段朗读 ===========
 
   /**
    * 从流式翻译文本中提取完整句子
@@ -331,6 +334,12 @@ class InterpretApp {
     } else if (fullText) {
       this.ttsManager.speak(fullText);
     }
+=======
+  // =========== 导出字幕 ===========
+
+  exportSubtitles() {
+    const format = this.elements.exportFormat.value;
+    this.subtitleManager.exportSubtitles(format);
   }
 
   _handleServerMessage(data) {
