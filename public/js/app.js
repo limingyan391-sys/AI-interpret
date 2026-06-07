@@ -286,6 +286,53 @@ class InterpretApp {
 
   // =========== 消息处理 ===========
 
+  // =========== 流式 TTS：按句子边界分段朗读 ===========
+
+  /**
+   * 从流式翻译文本中提取完整句子
+   */
+  _extractSentences(text) {
+    const sentences = [];
+    const re = /[^。！？.!?\n]+[。！？.!?\n]/g;
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      sentences.push(match[0].trim());
+    }
+    return sentences;
+  }
+
+  /**
+   * 流式翻译逐句朗读
+   */
+  _speakStreamingSentences(segmentId, partialText) {
+    if (!this.ttsManager || !this.ttsManager.enabled) return;
+    let entry = this._streamingTtsBuffer.get(segmentId);
+    if (!entry) { entry = { spokenLen: 0 }; this._streamingTtsBuffer.set(segmentId, entry); }
+    const newText = partialText.substring(entry.spokenLen);
+    if (!newText) return;
+    const sentences = this._extractSentences(newText);
+    if (sentences.length > 0) {
+      const lastSentence = sentences[sentences.length - 1];
+      entry.spokenLen += newText.lastIndexOf(lastSentence) + lastSentence.length;
+      for (const s of sentences) { this.ttsManager.speak(s); }
+    }
+  }
+
+  /**
+   * 翻译完成时朗读剩余文本
+   */
+  _flushStreamingTts(segmentId, fullText) {
+    if (!this.ttsManager || !this.ttsManager.enabled) return;
+    const entry = this._streamingTtsBuffer.get(segmentId);
+    if (entry) {
+      const remaining = fullText.substring(entry.spokenLen).trim();
+      if (remaining) { this.ttsManager.speak(remaining); }
+      this._streamingTtsBuffer.delete(segmentId);
+    } else if (fullText) {
+      this.ttsManager.speak(fullText);
+    }
+  }
+
   _handleServerMessage(data) {
     switch (data.type) {
       case "connected":
@@ -315,7 +362,7 @@ class InterpretApp {
 
         // TTS: 朗读翻译结果（非修正内容不重复朗读）
         if (!data.isCorrection && this.ttsManager) {
-          this.ttsManager.speak(data.translatedText);
+          this._flushStreamingTts(data.segmentId, data.translatedText);
         }
         break;
 
