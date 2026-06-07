@@ -1,10 +1,14 @@
 ﻿// server/translator.js
-// AI同声传译 - 翻译模块 (增强版修正机制)
+// AI同声传译 - 翻译模块 (增强版修正机制 + 语言切换感知)
 // 支持 DeepSeek / OpenAI 双模式 (API格式兼容)
-// 修正检测: 编辑距离 + 词级重叠 + 最小文本长度
 
 const OpenAI = require("openai");
 const config = require("./config");
+
+const LANG_NAMES = {
+  en: "英语", zh: "中文", ja: "日语", ko: "韩语",
+  fr: "法语", de: "德语", es: "西班牙语",
+};
 
 class Translator {
   constructor() {
@@ -22,6 +26,10 @@ class Translator {
     this.targetLang = config.translation.targetLang;
     this.contextWindowSize = config.translation.contextWindowSize;
 
+    // 记录上一次的语言设置，用于检测切换
+    this._lastSourceLang = this.sourceLang;
+    this._lastTargetLang = this.targetLang;
+
     this.history = [];
     this.allSegments = [];
     this.segmentIdCounter = 0;
@@ -32,13 +40,8 @@ class Translator {
   }
 
   _buildSystemPrompt() {
-    const langNames = {
-      en: "英语", zh: "中文", ja: "日语", ko: "韩语",
-      fr: "法语", de: "德语", es: "西班牙语",
-    };
-
-    const sourceName = langNames[this.sourceLang] || this.sourceLang;
-    const targetName = langNames[this.targetLang] || this.targetLang;
+    const sourceName = LANG_NAMES[this.sourceLang] || this.sourceLang;
+    const targetName = LANG_NAMES[this.targetLang] || this.targetLang;
 
     return [
       "你是一个专业的实时同声传译系统。",
@@ -73,6 +76,35 @@ class Translator {
         { role: "system", content: this._buildSystemPrompt() },
       ];
 
+      // === 语言切换感知 ===
+      // 如果用户切换了源语言或目标语言，在对话中插入一条切换通知
+      // 让模型明确知道语言方向已改变，避免被历史记录带偏
+      const langChanged = (this.sourceLang !== this._lastSourceLang) ||
+                          (this.targetLang !== this._lastTargetLang);
+      if (langChanged && this.history.length > 0) {
+        const oldSource = LANG_NAMES[this._lastSourceLang] || this._lastSourceLang;
+        const oldTarget = LANG_NAMES[this._lastTargetLang] || this._lastTargetLang;
+        const newSource = LANG_NAMES[this.sourceLang] || this.sourceLang;
+        const newTarget = LANG_NAMES[this.targetLang] || this.targetLang;
+
+        // 插入语言切换通知，让模型明确新的语言方向
+        messages.push({
+          role: "user",
+          content: `【语言切换通知】前面的对话是从${oldSource}到${oldTarget}的互译示例。现在请改为将${newSource}翻译成${newTarget}。接下来的输入都将遵循这个新的语言方向。`,
+        });
+        messages.push({
+          role: "assistant",
+          content: `明白，现在开始将${newSource}翻译成${newTarget}，不会再使用之前的语言方向。`,
+        });
+
+        console.log(`[翻译] 语言方向变更: ${oldSource}→${oldTarget} => ${newSource}→${newTarget}`);
+      }
+
+      // 记录当前语言设置，供下次检测
+      this._lastSourceLang = this.sourceLang;
+      this._lastTargetLang = this.targetLang;
+
+      // 添加上下文历史
       const recentHistory = this.history.slice(-this.contextWindowSize);
       for (const item of recentHistory) {
         messages.push({ role: "user", content: `原文: ${item.originalText}` });
@@ -111,17 +143,9 @@ class Translator {
     }
   }
 
-  /**
-   * 智能修正检测 (v2 - 降低误报率)
-   *
-   * 两点改进:
-   * 1. 要求文本长度至少 15 字符，避免短文本随机碰撞
-   * 2. 新增词级重叠检测: 两条文本必须共享至少一个实词(≥4字母)
-   */
+  // ... (rest of the methods unchanged)
   _detectCorrections(currentText, currentSegmentId) {
     const corrections = [];
-
-    // 太短的文本不触发修正 (避免 "?" 或 "ok" 这种误报)
     if (currentText.length < 15) return { hasCorrection: false, corrections };
 
     const recentSegments = this.allSegments.filter(
@@ -129,18 +153,14 @@ class Translator {
     ).slice(-5);
 
     for (const prev of recentSegments) {
-      // 历史文本太短也不参与修正检测
       if (prev.originalText.length < 10) continue;
 
       const prevText = prev.originalText.toLowerCase();
       const currText = currentText.toLowerCase();
 
-      // 前置检查: 必须有共同实词 (≥4字母的单词)
       if (!this._hasCommonWord(currText, prevText)) continue;
 
       const similarity = this._levenshteinSimilarity(currText, prevText);
-
-      // 提高阈值到 0.45 (原来是 0.3)
       if (similarity > 0.45 && similarity < 0.95) {
         corrections.push({
           originalSegmentId: prev.segmentId,
@@ -153,65 +173,47 @@ class Translator {
         continue;
       }
 
-      // 当前文本扩展了旧文本 (+ 词级重叠确认)
       if (currText.includes(prevText) && currText.length > prevText.length * 1.3) {
         corrections.push({
-          originalSegmentId: prev.segmentId,
-          originalText: prev.originalText,
-          originalTranslation: prev.translatedText,
-          newText: currentText,
+          originalSegmentId: prev.segmentId, originalText: prev.originalText,
+          originalTranslation: prev.translatedText, newText: currentText,
           type: "expansion", confidence: 85,
         });
         continue;
       }
 
-      // 旧文本包含当前文本的精炼 (+ 词级重叠确认)
       if (prevText.includes(currText) && prevText.length > currText.length * 1.3) {
         corrections.push({
-          originalSegmentId: prev.segmentId,
-          originalText: prev.originalText,
-          originalTranslation: prev.translatedText,
-          newText: currentText,
+          originalSegmentId: prev.segmentId, originalText: prev.originalText,
+          originalTranslation: prev.translatedText, newText: currentText,
           type: "refinement", confidence: 75,
         });
       }
     }
-
     return { hasCorrection: corrections.length > 0, corrections };
   }
 
-  /**
-   * 检查两条文本是否有共同实词 (≥4字母)
-   * 避免 "call yourself" 和 "take me to your home" 因字符随机匹配被误判
-   */
   _hasCommonWord(a, b) {
     const wordsA = new Set(a.split(/\s+/).filter((w) => w.length >= 4));
     const wordsB = new Set(b.split(/\s+/).filter((w) => w.length >= 4));
-    for (const w of wordsA) {
-      if (wordsB.has(w)) return true;
-    }
+    for (const w of wordsA) { if (wordsB.has(w)) return true; }
     return false;
   }
 
   _levenshteinSimilarity(a, b) {
     if (a === b) return 1;
     if (a.length === 0 || b.length === 0) return 0;
-
     const matrix = Array.from({ length: b.length + 1 }, (_, i) => [i]);
     for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-
     for (let i = 1; i <= b.length; i++) {
       for (let j = 1; j <= a.length; j++) {
         matrix[i][j] = Math.min(
-          matrix[i - 1][j] + 1,
-          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1, matrix[i][j - 1] + 1,
           matrix[i - 1][j - 1] + (a[j - 1] === b[i - 1] ? 0 : 1)
         );
       }
     }
-
-    const maxLen = Math.max(a.length, b.length);
-    return 1 - matrix[b.length][a.length] / maxLen;
+    return 1 - matrix[b.length][a.length] / Math.max(a.length, b.length);
   }
 
   setSourceLang(lang) {
