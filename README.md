@@ -1,5 +1,9 @@
 ﻿# 🎙️ AI 同声传译助手
 
+
+## 📺 演示视频
+
+[点击观看B站演示视频](https://www.bilibili.com/video/BV1GJ411x7A7/)
 > 通过 AI 能力将实时语音流翻译成目标语言，以字幕 + 语音形式呈现，帮助用户跨越语言障碍。
 
 ## ✨ 功能特点
@@ -223,3 +227,4 @@ npm test              # 运行所有测试 (57 tests)
 npm run test:watch    # 监听模式
 npm run test:coverage # 覆盖率报告
 ```
+
