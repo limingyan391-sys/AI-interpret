@@ -6,8 +6,23 @@ jest.mock("openai", () => {
   return jest.fn().mockImplementation(() => ({
     chat: {
       completions: {
-        create: jest.fn().mockResolvedValue({
-          choices: [{ message: { content: "这是模拟翻译结果。" } }],
+        create: jest.fn().mockImplementation(async () => {
+          // 流式响应：逐 token 返回模拟翻译结果
+          const tokens = "这是模拟翻译结果。";
+          const self = { [Symbol.asyncIterator]: () => {
+            let i = 0;
+            return {
+              next: () => {
+                if (i < tokens.length) {
+                  const chunk = { choices: [{ delta: { content: tokens[i] }, index: 0 }] };
+                  i++;
+                  return Promise.resolve({ value: chunk, done: false });
+                }
+                return Promise.resolve({ done: true });
+              },
+            };
+          }};
+          return self;
         }),
       },
     },
@@ -204,11 +219,31 @@ describe("翻译模块 - 翻译功能", () => {
     expect(r2.segmentId).toBe(2);
   });
 
-  test("设置源语言和目标语言", () => {
+    test("设置源语言和目标语言", () => {
     const t = new Translator();
     t.setSourceLang("fr");
     t.setTargetLang("de");
     expect(t.sourceLang).toBe("fr");
     expect(t.targetLang).toBe("de");
   });
+
+  test("切换源语言清空翻译历史", async () => {
+    const t = new Translator();
+    await t.translate("First sentence", { segmentId: 1 });
+    await t.translate("Second sentence", { segmentId: 2 });
+    expect(t.history).toHaveLength(2);
+    t.setSourceLang("zh");
+    expect(t.history).toHaveLength(0);
+    expect(t.allSegments).toHaveLength(0);
+  });
+
+  test("切换目标语言清空翻译历史", async () => {
+    const t = new Translator();
+    await t.translate("Test text", { segmentId: 1 });
+    expect(t.history).toHaveLength(1);
+    t.setTargetLang("ja");
+    expect(t.history).toHaveLength(0);
+    expect(t.allSegments).toHaveLength(0);
+  });
 });
+

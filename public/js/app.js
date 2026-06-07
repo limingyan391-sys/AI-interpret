@@ -1,4 +1,4 @@
-﻿// public/js/app.js
+// public/js/app.js
 // AI同声传译 - 主应用逻辑 (Web Speech API + DeepSeek 版 + TTS)
 // 使用浏览器内置语音识别 + 后端翻译 + TTS语音朗读
 
@@ -12,6 +12,7 @@ class InterpretApp {
     this.isRecording = false;
     this.isDemoMode = false;
     this.serverUrl = "ws://localhost:3000";
+    this._streamingTtsBuffer = new Map();
 
     this.elements = {
       btnRecord: document.getElementById("btnRecord"),
@@ -315,6 +316,13 @@ class InterpretApp {
         // TTS: 朗读翻译结果（非修正内容不重复朗读）
         if (!data.isCorrection && this.ttsManager) {
           this.ttsManager.speak(data.translatedText);
+        }
+        break;
+
+      case "translation_chunk":
+        // 流式翻译进度：实时显示翻译文本逐词展开
+        if (data.partialText && data.segmentId) {
+          this.subtitleManager.updateStreamingTranslation(data.segmentId, data.partialText);
         }
         break;
 
