@@ -1,125 +1,17 @@
-﻿# 🎙️ AI 同声传译助手
+PR 8：自我测试功能
+标题：add unit tests for core modules with Jest (45 tests, all passing)
 
-> 通过 AI 能力将实时语音流翻译成中文，以字幕形式呈现，帮助用户跨越语言障碍。
+功能描述：
+使用 Jest 框架为项目核心模块添加单元测试，共 45 个测试用例，全部通过。（运行方式：npm test）
 
-## ✨ 功能特点
+测试内容：
+1.config 模块：默认值加载、环境变量覆盖、API Key 检测、模式识别（DeepSeek/OpenAI/Demo）、端口解析
+2.translator 模块：Levenshtein 编辑距离算法、三种修正检测策略（rephrase/expansion/refinement）、翻译流程、历史记录管理、重置
+3.stt 模块：browser 模式文本透传、whisper 模式 API 调用 mock
+4.mock 模块：模拟 STT 双模式输入、模拟翻译字典匹配、修正检测
+5.websocket 模块：服务初始化、JSON 消息发送、连接状态判断
 
-- **实时语音识别**：使用 OpenAI Whisper API 将音频实时转为文字
-- **智能翻译**：使用 GPT 模型将识别结果翻译为目标语言，保持语义自然
-- **上下文修正**：自动检测并修正之前的识别或翻译错误
-- **音频可视化**：实时显示音频频谱
-- **双语字幕**：原文和译文并排展示，方便对照
-- **语言选择**：支持多种源语言和目标语言切换
-
-## 🚀 快速开始
-
-### 前置要求
-
-- [Node.js](https://nodejs.org/) >= 18.0.0
-- [OpenAI API Key](https://platform.openai.com/api-keys)
-- 麦克风设备
-
-### 安装
-
-```bash
-# 1. 克隆项目
-git clone <repo-url>
-cd ai-interpret
-
-# 2. 安装依赖
-npm install
-
-# 3. 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，填入你的 OpenAI API Key
-```
-
-### 运行
-
-```bash
-# 启动后端服务
-npm start
-
-# 开发模式 (带热重载)
-npm run dev
-```
-
-服务启动后，浏览器访问 `http://localhost:3000` 即可使用。
-
-## 🔧 配置说明
-
-编辑 `.env` 文件可配置以下参数：
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `OPENAI_API_KEY` | OpenAI API Key | - |
-| `OPENAI_BASE_URL` | 自定义 API 地址 | https://api.openai.com/v1 |
-| `STT_MODEL` | 语音识别模型 | whisper-1 |
-| `TRANSLATION_MODEL` | 翻译模型 | gpt-4o-mini |
-| `SOURCE_LANG` | 源语言 | en |
-| `TARGET_LANG` | 目标语言 | zh |
-| `PORT` | 服务端口 | 3000 |
-
-## 🏗️ 项目结构
-
-```
-ai-interpret/
-├── server/              # 后端服务
-│   ├── index.js         # 服务入口
-│   ├── config.js        # 配置管理
-│   ├── stt.js           # 语音识别模块 (Whisper API)
-│   ├── translator.js    # 翻译模块 (GPT) + 修正机制
-│   └── websocket.js     # WebSocket 通信管理
-├── public/              # 前端页面
-│   ├── index.html       # 主页面
-│   ├── css/
-│   │   └── style.css    # 界面样式
-│   └── js/
-│       ├── app.js       # 主应用逻辑
-│       ├── audio.js     # 音频捕获模块
-│       └── subtitles.js # 字幕显示模块
-├── .env.example         # 环境变量模板
-├── package.json
-└── README.md
-```
-
-## 🧠 技术架构
-
-### 数据流
-
-```
-麦克风 → MediaRecorder → WebSocket → Whisper STT → GPT 翻译 → WebSocket → 字幕显示
-                                          ↓               ↓
-                                    错误检测 ←—— 上下文窗口 ——→ 修正推送
-```
-
-### 核心模块
-
-1. **音频捕获** (`public/js/audio.js`)
-   - 使用浏览器 `MediaRecorder` API 捕获麦克风音频
-   - 每 3 秒自动分段，通过 WebSocket 发送到后端
-
-2. **语音识别** (`server/stt.js`)
-   - 调用 OpenAI Whisper API 进行语音转文字
-   - 支持多种音频格式 (webm, ogg, mp4)
-
-3. **智能翻译** (`server/translator.js`)
-   - 使用 GPT 模型进行上下文感知翻译
-   - 保留最近对话历史，确保翻译一致性
-   - 自动检测并修正之前的翻译错误
-
-4. **修正机制**
-   - 通过文本相似度比较检测识别差异
-   - 当新识别结果与历史记录部分重叠时触发修正
-   - 前端用高亮动画展示修正前后对比
-
-## 📦 依赖
-
-- [express](https://www.npmjs.com/package/express) - HTTP 服务器
-- [ws](https://www.npmjs.com/package/ws) - WebSocket 通信
-- [openai](https://www.npmjs.com/package/openai) - OpenAI API 客户端
-- [dotenv](https://www.npmjs.com/package/dotenv) - 环境变量管理
-
-## 🤝 贡献
-
-欢迎提交 Issue 或 PR！
+测试方式：
+1.npm test           # 运行所有测试
+2.npm run test:watch  # 监听模式--运行后 Jest 不会退出，持续监听文件变化，改一行代码保存后，关联的测试自动重新运行，秒级反馈。
+3.npm run test:coverage  # 覆盖率报告--运行完会在终端和文件系统里生成覆盖率报告，存到coverage/ 文件夹里面有 HTML 报告，浏览器打开可以交互式查看每行代码是否被覆盖。
