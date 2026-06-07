@@ -1,8 +1,7 @@
 ﻿// server/translator.js
-// AI同声传译 - 翻译模块
+// AI同声传译 - 翻译模块 (增强版修正机制)
 // 支持 DeepSeek / OpenAI 双模式 (API格式兼容)
-// 依赖: openai (https://www.npmjs.com/package/openai)
-// DeepSeek API: https://platform.deepseek.com/api-docs
+// 修正检测: 编辑距离 + 词级重叠 + 最小文本长度
 
 const OpenAI = require("openai");
 const config = require("./config");
@@ -11,7 +10,6 @@ class Translator {
   constructor() {
     if (!config.hasApiKey()) {
       console.error("[翻译] 错误: 未配置 API Key");
-      console.error("[翻译] 使用 DeepSeek: 在 .env 中设置 OPENAI_API_KEY 和 OPENAI_BASE_URL");
     }
 
     this.client = new OpenAI({
@@ -60,12 +58,6 @@ class Translator {
     ].join("\n");
   }
 
-  /**
-   * 翻译文本，带回溯修正检测
-   * @param {string} text - 待翻译文本
-   * @param {object} meta - { segmentId, timestamp }
-   * @returns {Promise<object>}
-   */
   async translate(text, meta = {}) {
     if (!text || text.trim().length === 0) {
       return { translatedText: "", segmentId: -1, isCorrection: false, corrections: [] };
@@ -99,17 +91,13 @@ class Translator {
       const translatedText = response.choices[0]?.message?.content?.trim() || "";
 
       this.history.push({
-        segmentId,
-        originalText: text,
-        translatedText,
-        timestamp,
+        segmentId, originalText: text, translatedText, timestamp,
         isCorrection: correctionInfo.hasCorrection,
       });
       this.allSegments.push({ segmentId, originalText: text, translatedText, timestamp });
 
       return {
-        translatedText,
-        segmentId,
+        translatedText, segmentId,
         isCorrection: correctionInfo.hasCorrection,
         corrections: correctionInfo.corrections,
       };
@@ -118,29 +106,42 @@ class Translator {
       if (error.status === 401) console.error("[翻译] API Key 无效");
       return {
         translatedText: `[翻译失败: ${error.message}]`,
-        segmentId,
-        isCorrection: false,
-        corrections: [],
+        segmentId, isCorrection: false, corrections: [],
       };
     }
   }
 
   /**
-   * 智能修正检测
+   * 智能修正检测 (v2 - 降低误报率)
+   *
+   * 两点改进:
+   * 1. 要求文本长度至少 15 字符，避免短文本随机碰撞
+   * 2. 新增词级重叠检测: 两条文本必须共享至少一个实词(≥4字母)
    */
   _detectCorrections(currentText, currentSegmentId) {
     const corrections = [];
+
+    // 太短的文本不触发修正 (避免 "?" 或 "ok" 这种误报)
+    if (currentText.length < 15) return { hasCorrection: false, corrections };
+
     const recentSegments = this.allSegments.filter(
       (s) => s.segmentId !== currentSegmentId
     ).slice(-5);
 
     for (const prev of recentSegments) {
+      // 历史文本太短也不参与修正检测
+      if (prev.originalText.length < 10) continue;
+
       const prevText = prev.originalText.toLowerCase();
       const currText = currentText.toLowerCase();
 
-      // 编辑距离相似度
+      // 前置检查: 必须有共同实词 (≥4字母的单词)
+      if (!this._hasCommonWord(currText, prevText)) continue;
+
       const similarity = this._levenshteinSimilarity(currText, prevText);
-      if (similarity > 0.3 && similarity < 0.95) {
+
+      // 提高阈值到 0.45 (原来是 0.3)
+      if (similarity > 0.45 && similarity < 0.95) {
         corrections.push({
           originalSegmentId: prev.segmentId,
           originalText: prev.originalText,
@@ -152,33 +153,44 @@ class Translator {
         continue;
       }
 
-      // 当前文本扩展了旧文本
+      // 当前文本扩展了旧文本 (+ 词级重叠确认)
       if (currText.includes(prevText) && currText.length > prevText.length * 1.3) {
         corrections.push({
           originalSegmentId: prev.segmentId,
           originalText: prev.originalText,
           originalTranslation: prev.translatedText,
           newText: currentText,
-          type: "expansion",
-          confidence: 85,
+          type: "expansion", confidence: 85,
         });
         continue;
       }
 
-      // 旧文本包含当前文本的精炼
+      // 旧文本包含当前文本的精炼 (+ 词级重叠确认)
       if (prevText.includes(currText) && prevText.length > currText.length * 1.3) {
         corrections.push({
           originalSegmentId: prev.segmentId,
           originalText: prev.originalText,
           originalTranslation: prev.translatedText,
           newText: currentText,
-          type: "refinement",
-          confidence: 75,
+          type: "refinement", confidence: 75,
         });
       }
     }
 
     return { hasCorrection: corrections.length > 0, corrections };
+  }
+
+  /**
+   * 检查两条文本是否有共同实词 (≥4字母)
+   * 避免 "call yourself" 和 "take me to your home" 因字符随机匹配被误判
+   */
+  _hasCommonWord(a, b) {
+    const wordsA = new Set(a.split(/\s+/).filter((w) => w.length >= 4));
+    const wordsB = new Set(b.split(/\s+/).filter((w) => w.length >= 4));
+    for (const w of wordsA) {
+      if (wordsB.has(w)) return true;
+    }
+    return false;
   }
 
   _levenshteinSimilarity(a, b) {
@@ -202,19 +214,14 @@ class Translator {
     return 1 - matrix[b.length][a.length] / maxLen;
   }
 
-
-  /**
-   * 动态更新源语言
-   */
   setSourceLang(lang) {
-    this.sourceLang = lang; this.history = []; this.allSegments = []; console.log(`[翻译] 源语言切换为: ${lang}`);
+    this.sourceLang = lang;
+    console.log(`[翻译] 源语言切换为: ${lang}`);
   }
 
-  /**
-   * 动态更新目标语言
-   */
   setTargetLang(lang) {
-    this.targetLang = lang; this.history = []; this.allSegments = []; console.log(`[翻译] 目标语言切换为: ${lang}`);
+    this.targetLang = lang;
+    console.log(`[翻译] 目标语言切换为: ${lang}`);
   }
 
   reset() {
@@ -225,6 +232,3 @@ class Translator {
 }
 
 module.exports = Translator;
-
-
-

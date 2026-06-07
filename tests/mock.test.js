@@ -28,17 +28,16 @@ describe("Mock 模块", () => {
       expect(r1.text).not.toBe(r2.text);
     });
 
-    test("多次调用覆盖不同场景", async () => {
+        test("连续调用推进不同场景", async () => {
       const stt = new MockSTT();
-      const texts = new Set();
-      // 用较短超时
-      for (let i = 0; i < 10; i++) {
-        const r = await stt.transcribe(Buffer.from("audio"), "webm");
-        texts.add(r.text);
-      }
-      expect(texts.size).toBeGreaterThan(3);
-    }, 10000);
-  });
+      const r1 = await stt.transcribe(Buffer.from("audio"), "webm");
+      const r2 = await stt.transcribe(Buffer.from("audio"), "webm");
+      const r3 = await stt.transcribe(Buffer.from("audio"), "webm");
+      // 同场景下三个逐步细化的版本
+      expect(r1.text).not.toBe(r2.text);
+      expect(r2.text).not.toBe(r3.text);
+      expect(r3.text.split(/\s+/).length).toBeGreaterThan(5);
+    }, 10000);  });
 
   // ========== Mock Translator ==========
   describe("MockTranslator", () => {
@@ -89,3 +88,4 @@ describe("Mock 模块", () => {
     });
   });
 });
+

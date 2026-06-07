@@ -1,12 +1,22 @@
 ﻿// tests/config.test.js
 // AI同声传译 - 配置模块单元测试
+// 注意: .env 文件存在时，dotenv.config() 会自动加载
+// 需在 require 前设好环境变量阻止 dotenv 覆盖
 
 describe("配置模块", () => {
   const ORIGINAL_ENV = process.env;
 
   beforeEach(() => {
     jest.resetModules();
-    process.env = { ...ORIGINAL_ENV };
+    // dotenv.config() 不会覆盖已存在的环境变量
+    // 预置空值来阻止 .env 文件的值被加载
+    process.env.OPENAI_API_KEY = "";
+    process.env.OPENAI_BASE_URL = "";
+    process.env.STT_ENGINE = "";
+    process.env.TRANSLATION_MODEL = "";
+    process.env.SOURCE_LANG = "";
+    process.env.TARGET_LANG = "";
+    process.env.PORT = "";
   });
 
   afterEach(() => {
@@ -15,14 +25,6 @@ describe("配置模块", () => {
 
   // ========== 默认值 ==========
   test("无环境变量时使用默认值", () => {
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.OPENAI_BASE_URL;
-    delete process.env.STT_ENGINE;
-    delete process.env.TRANSLATION_MODEL;
-    delete process.env.SOURCE_LANG;
-    delete process.env.TARGET_LANG;
-    delete process.env.PORT;
-
     const config = require("../server/config");
 
     expect(config.llm.apiKey).toBe("");
@@ -63,7 +65,6 @@ describe("配置模块", () => {
   });
 
   test("空 API Key 返回 false", () => {
-    delete process.env.OPENAI_API_KEY;
     const config = require("../server/config");
     expect(config.hasApiKey()).toBe(false);
   });
@@ -90,7 +91,6 @@ describe("配置模块", () => {
   });
 
   test("无 Key 返回 demo 模式", () => {
-    delete process.env.OPENAI_API_KEY;
     const config = require("../server/config");
     expect(config.getMode()).toBe("demo");
   });
