@@ -181,7 +181,7 @@ class SpeechCapture {
         console.log("[语音] 自动重启识别...");
         this._startRecognition();
       }
-    }, 300);
+    }, 0);
   }
 
   /**
@@ -249,7 +249,7 @@ class SpeechCapture {
         try { this.recognition.stop(); } catch (e) { /* ignore */ }
       }
       this.isListening = false;
-      setTimeout(() => this._startRecognition(), 200);
+      this._startRecognition();
     }
   }
 
