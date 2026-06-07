@@ -11,7 +11,7 @@
 - **音频可视化**：实时显示音频频谱
 - **双语字幕**：原文和译文并排展示，支持原位修正更新
 - **多语言支持**：英语/中文/日语/韩语/法语/德语/西班牙语互译
-- **字幕导出**：支持 SRT / TXT 格式导出翻译字幕，一键保存
+- **字幕导出**：支持 SRT / TXT 格式导出翻译字幕，一键保存到本地
 - **一键演示**：`npm run demo` 零配置即可体验完整功能
 
 ## 🚀 快速开始
@@ -76,6 +76,18 @@ TRANSLATION_MODEL=deepseek-chat
 STT_ENGINE=browser
 ```
 
+> 支持 deepseek-chat、deepseek-v4-flash 等翻译模型。
+> 若未配置 API Key，服务自动以**演示模式**运行（npm run demo），使用内置模拟数据，无需任何 Key。
+
+### 演示模式
+
+```bash
+npm run demo
+```
+
+演示模式下使用 MockSTT 和 MockTranslator 模拟语音识别和翻译，无需配置任何 API Key，
+适合快速体验界面交互、字幕显示、TTS 朗读和字幕导出功能。
+
 ### OpenAI 配置示例
 
 ```bash
@@ -120,13 +132,15 @@ ai-interpret/
 
 ```
                           浏览器端                             服务端
-                    ┌──────────────────┐            ┌──────────────────┐
-                    │ Web Speech API   │────文本───▶│  DeepSeek/GPT    │
-                    │ (语音识别, 免费)  │  stt_result │  翻译引擎        │
-                    │                  │◀───翻译────│                  │
-                    │ TTS 语音朗读      │  translation└──────────────────┘
-                    │ 字幕 + 修正显示   │
-                    └──────────────────┘
+                    ┌─────────────────────────────────────┐
+                    │ Web Speech API                       │
+                    │ (语音识别, 免费)    ──stt_result──▶  │  DeepSeek/GPT
+                    │                                     │  翻译引擎
+                    │                    ◀──translation── │
+                    │ TTS 语音朗读                          │
+                    │ 字幕显示 + 修正更新                    │
+                    │ 字幕导出 (SRT/TXT) ──→ 本地文件       │
+                    └─────────────────────────────────────┘
                            ↑ 用户
                     麦克风 + 扬声器
 ```
@@ -134,17 +148,17 @@ ai-interpret/
 ### PR 演进历程
 
 ```
-PR 1: 项目脚手架搭建
-PR 2: 后端服务 - WebSocket + STT + 翻译
-PR 3: 前端增强 - 自动连接 + 原位修正UI
-PR 4: 增强修正机制 - Levenshtein 编辑距离检测
-PR 5: DeepSeek API 集成 + 浏览器端 Web Speech API
-PR 6: 修复语言切换不同步 Bug
-PR 7: TTS 语音合成 - 翻译结果自动朗读
-PR 8: 单元测试 - Jest 框架, 55 tests, 77% 覆盖率
-PR 9: 流式翻译 - 实时逐词显示翻译结果（独立分支）
-PR10: 流式TTS - 流式翻译完成时立即朗读完整句子（独立分支）
-PR11: 字幕导出 - 支持 SRT / TXT 格式导出翻译字幕
+PR 1: 项目脚手架搭建 — Express + WebSocket 基础框架
+PR 2: 后端服务 — WebSocket 通信 + STT 模块 + 翻译模块 + 演示模式
+PR 3: 前端增强 — 自动连接 + 原位修正 UI + 音频可视化
+PR 4: 增强修正机制 — Levenshtein 编辑距离 + 三策略检测
+PR 5: DeepSeek API 集成 + 浏览器端 Web Speech API（免费语音识别）
+PR 6: 修复语言切换不同步 Bug — 翻译器语言方向与界面保持同步
+PR 7: TTS 语音合成 — 翻译结果自动朗读，朗读队列防重叠
+PR 8: 单元测试 — Jest 框架，55 tests，77% 覆盖率
+PR 9: 流式翻译 — 实时逐词显示翻译结果（独立分支）
+PR10: 流式TTS — 流式翻译完成时立即朗读完整句子（独立分支）
+PR11: 字幕导出 — SRT / TXT 格式导出，SecurityError 回退修复
 ```
 
 ### 核心模块
