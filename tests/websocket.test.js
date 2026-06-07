@@ -66,8 +66,9 @@ describe("WebSocket 模块", () => {
       type: "stt_result", text: "Hello world", timestamp: 1,
     })), state);
 
-    expect(mockStt.transcribe).toHaveBeenCalledWith("Hello world");
-    expect(mockTranslator.translate).toHaveBeenCalled();
+    // browser 模式直接透传文本，跳过 stt.transcribe
+    expect(mockStt.transcribe).not.toHaveBeenCalled();
+    expect(mockTranslator.translate).toHaveBeenCalledWith("Hello world", expect.any(Object));
     expect(state.lastSttText).toBe("Hello world");
   });
 
