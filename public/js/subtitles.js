@@ -84,7 +84,7 @@ class SubtitleManager {
     }
 
     // 清除对应的流式条目
-    const streamKey = "stream_" + segmentId;
+    const streamKey = "stream_" + segmentId.replace(/^trans_/, "");
     const streamItem = this.streamingItemMap.get(streamKey);
     if (streamItem) {
       streamItem.remove();
