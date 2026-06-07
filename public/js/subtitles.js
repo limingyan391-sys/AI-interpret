@@ -256,3 +256,188 @@ class SubtitleManager {
 }
 
 window.SubtitleManager = SubtitleManager;
+
+// ====================================
+// TTS 语音合成引擎
+// 使用浏览器 Web Speech Synthesis API
+// 将翻译结果朗读出来，实现真正的同声传译
+// API: https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis
+// ====================================
+
+class TTSManager {
+  constructor() {
+    this.enabled = true;
+    this.isSpeaking = false;
+    this.queue = [];
+    this.currentUtterance = null;
+
+    // 目标语言 → BCP-47 语言标签映射
+    this.langMap = {
+      zh: "zh-CN",
+      en: "en-US",
+      ja: "ja-JP",
+      ko: "ko-KR",
+      fr: "fr-FR",
+      de: "de-DE",
+      es: "es-ES",
+    };
+
+    this.currentLang = "zh-CN";
+
+    // 回调: 通知 UI 朗读状态变化
+    this.onSpeakingStateChange = null;
+
+    // 监听 voices 加载完成
+    if (typeof speechSynthesis !== "undefined" && speechSynthesis.onvoiceschanged !== undefined) {
+      speechSynthesis.onvoiceschanged = () => {}; // 触发 voice 加载
+    }
+  }
+
+  /**
+   * 设置目标语言 (用于选择对应的语音)
+   */
+  setLanguage(langCode) {
+    this.currentLang = this.langMap[langCode] || "zh-CN";
+  }
+
+  /**
+   * 切换 TTS 开关
+   */
+  toggle() {
+    this.enabled = !this.enabled;
+    if (!this.enabled) {
+      this.stop();
+    }
+    return this.enabled;
+  }
+
+  /**
+   * 朗读翻译文本
+   * 自动排队，不会重叠朗读
+   */
+  speak(text) {
+    if (!this.enabled || !text || text.trim().length === 0) return;
+
+    // 如果正在朗读中，加入队列
+    if (this.isSpeaking) {
+      this.queue.push(text);
+      return;
+    }
+
+    this._speakNow(text);
+  }
+
+  /**
+   * 立即朗读
+   */
+  _speakNow(text) {
+    if (typeof speechSynthesis === "undefined") {
+      console.warn("[TTS] 浏览器不支持 Speech Synthesis API");
+      return;
+    }
+
+    // 取消当前朗读
+    if (this.currentUtterance) {
+      speechSynthesis.cancel();
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = this.currentLang;
+    utterance.rate = 1.0;  // 语速
+    utterance.pitch = 1.0; // 音调
+    utterance.volume = 1.0;
+
+    // 选择合适的语音
+    utterance.voice = this._findBestVoice(this.currentLang);
+
+    this.isSpeaking = true;
+    this.currentUtterance = utterance;
+
+    if (this.onSpeakingStateChange) {
+      this.onSpeakingStateChange(true);
+    }
+
+    utterance.onend = () => {
+      this.isSpeaking = false;
+      this.currentUtterance = null;
+
+      if (this.onSpeakingStateChange) {
+        this.onSpeakingStateChange(false);
+      }
+
+      // 播放下一条队列
+      if (this.queue.length > 0) {
+        const next = this.queue.shift();
+        this._speakNow(next);
+      }
+    };
+
+    utterance.onerror = (event) => {
+      if (event.error !== "canceled" && event.error !== "interrupted") {
+        console.warn("[TTS] 朗读错误:", event.error);
+      }
+      this.isSpeaking = false;
+      this.currentUtterance = null;
+
+      if (this.onSpeakingStateChange) {
+        this.onSpeakingStateChange(false);
+      }
+
+      // 继续播放下一条
+      if (this.queue.length > 0) {
+        const next = this.queue.shift();
+        this._speakNow(next);
+      }
+    };
+
+    speechSynthesis.speak(utterance);
+  }
+
+  /**
+   * 停止朗读并清空队列
+   */
+  stop() {
+    if (typeof speechSynthesis !== "undefined") {
+      speechSynthesis.cancel();
+    }
+    this.queue = [];
+    this.isSpeaking = false;
+    this.currentUtterance = null;
+
+    if (this.onSpeakingStateChange) {
+      this.onSpeakingStateChange(false);
+    }
+  }
+
+  /**
+   * 查找最适合目标语言的语音
+   * 优先使用本地语音，回退到任意该语言的语音
+   */
+  _findBestVoice(lang) {
+    if (typeof speechSynthesis === "undefined") return null;
+
+    const voices = speechSynthesis.getVoices();
+    if (voices.length === 0) return null;
+
+    // 精确匹配语言
+    const exact = voices.find((v) => v.lang === lang);
+    if (exact) return exact;
+
+    // 匹配语言前缀 (如 zh-CN 匹配 zh-HK, zh-TW)
+    const langPrefix = lang.split("-")[0];
+    const prefixMatch = voices.find((v) => v.lang.startsWith(langPrefix));
+    if (prefixMatch) return prefixMatch;
+
+    // 返回默认语音
+    return voices[0] || null;
+  }
+
+  /**
+   * 检查浏览器是否支持
+   */
+  static isSupported() {
+    return typeof speechSynthesis !== "undefined";
+  }
+}
+
+window.TTSManager = TTSManager;

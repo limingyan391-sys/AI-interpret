@@ -412,3 +412,49 @@ body {
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
 }
+/* ===== TTS 按钮样式 ===== */
+.btn-tts {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  transition: all 0.3s;
+}
+
+.btn-tts.active {
+  background: #ecfdf5;
+  color: #059669;
+  border-color: #059669;
+  box-shadow: 0 0 0 1px rgba(5, 150, 105, 0.2);
+}
+
+.btn-tts.active:hover {
+  background: #d1fae5;
+}
+
+.btn-tts:not(.active) {
+  opacity: 0.6;
+}
+
+/* ===== 朗读状态指示器 ===== */
+.speaking-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #059669;
+  background: #ecfdf5;
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid #a7f3d0;
+  animation: speakingPulse 1s ease-in-out infinite;
+  white-space: nowrap;
+}
+
+.speaking-text {
+  font-weight: 500;
+}
+
+@keyframes speakingPulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; box-shadow: 0 0 6px rgba(5, 150, 105, 0.3); }
+}

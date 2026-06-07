@@ -1,12 +1,13 @@
 ﻿// public/js/app.js
-// AI同声传译 - 主应用逻辑 (Web Speech API + DeepSeek 版)
-// 使用浏览器内置语音识别 + 后端 DeepSeek/OpenAI 翻译
+// AI同声传译 - 主应用逻辑 (Web Speech API + DeepSeek 版 + TTS)
+// 使用浏览器内置语音识别 + 后端翻译 + TTS语音朗读
 
 class InterpretApp {
   constructor() {
     this.ws = null;
     this.speechCapture = null;
     this.subtitleManager = null;
+    this.ttsManager = null;
     this.isConnected = false;
     this.isRecording = false;
     this.isDemoMode = false;
@@ -17,8 +18,10 @@ class InterpretApp {
       btnReset: document.getElementById("btnReset"),
       btnClear: document.getElementById("btnClear"),
       btnConnect: document.getElementById("btnConnect"),
+      btnTts: document.getElementById("btnTts"),
       statusIndicator: document.getElementById("statusIndicator"),
       statusText: document.getElementById("statusText"),
+      speakingIndicator: document.getElementById("speakingIndicator"),
       sttBadge: document.getElementById("sttBadge"),
       transBadge: document.getElementById("transBadge"),
       sourceLang: document.getElementById("sourceLang"),
@@ -32,6 +35,22 @@ class InterpretApp {
   init() {
     this.subtitleManager = new SubtitleManager({ maxItems: 20 });
 
+    // 初始化 TTS
+    if (TTSManager.isSupported()) {
+      this.ttsManager = new TTSManager();
+      this.ttsManager.onSpeakingStateChange = (speaking) => {
+        this._onTtsStateChange(speaking);
+      };
+      // 设置初始语言
+      this.ttsManager.setLanguage(this.elements.targetLang.value);
+    } else {
+      console.warn("[TTS] 浏览器不支持语音合成");
+      if (this.elements.btnTts) {
+        this.elements.btnTts.disabled = true;
+        this.elements.btnTts.textContent = "🔇 不支持";
+      }
+    }
+
     // 初始化 canvas
     this._resizeVisualizer();
     window.addEventListener("resize", () => this._resizeVisualizer());
@@ -43,11 +62,16 @@ class InterpretApp {
     this.elements.btnClear.addEventListener("click", () => this.subtitleManager.clearAll());
     this.elements.sourceLang.addEventListener("change", () => this.updateLang());
     this.elements.targetLang.addEventListener("change", () => this.updateLangConfig());
+
+    // TTS 开关
+    if (this.elements.btnTts) {
+      this.elements.btnTts.addEventListener("click", () => this.toggleTts());
+    }
+
     this.elements.serverUrl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") this.connect();
     });
 
-    // 检查浏览器兼容性
     if (!SpeechCapture.isSupported()) {
       alert("⚠️ 您的浏览器不支持 Web Speech API。\n请使用 Chrome 或 Edge 浏览器。");
       this.elements.btnRecord.disabled = true;
@@ -56,6 +80,8 @@ class InterpretApp {
     this._checkServerHealth();
     console.log("[应用] AI同声传译助手已初始化");
   }
+
+  // =========== 连接管理 ===========
 
   async connect() {
     const url = this.elements.serverUrl.value.trim() || this.serverUrl;
@@ -100,6 +126,8 @@ class InterpretApp {
     }
   }
 
+  // =========== 录音管理 ===========
+
   async toggleRecording() {
     if (this.isRecording) {
       this.stopRecording();
@@ -114,7 +142,6 @@ class InterpretApp {
     this.speechCapture = new SpeechCapture();
 
     this.speechCapture.onResult = (text) => {
-      // 最终识别结果 → 发送到服务器翻译
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({
           type: "stt_result",
@@ -125,7 +152,6 @@ class InterpretApp {
     };
 
     this.speechCapture.onInterimResult = (text) => {
-      // 中间结果 → 显示在原文面板
       this._showInterimText(text);
     };
 
@@ -168,10 +194,43 @@ class InterpretApp {
     this._clearInterimText();
   }
 
+  // =========== TTS 控制 ===========
+
+  toggleTts() {
+    if (!this.ttsManager) return;
+
+    const enabled = this.ttsManager.toggle();
+    const btn = this.elements.btnTts;
+    if (btn) {
+      btn.classList.toggle("active", enabled);
+      btn.textContent = enabled ? "🔊 语音" : "🔇 静音";
+    }
+
+    if (!enabled) {
+      this.elements.speakingIndicator.style.display = "none";
+    }
+
+    console.log(`[TTS] ${enabled ? "已开启" : "已关闭"}`);
+  }
+
+  _onTtsStateChange(speaking) {
+    const indicator = this.elements.speakingIndicator;
+    if (!indicator) return;
+
+    if (speaking && this.ttsManager && this.ttsManager.enabled) {
+      indicator.style.display = "inline-flex";
+    } else {
+      indicator.style.display = "none";
+    }
+  }
+
+  // =========== 语言设置 ===========
+
   resetSession() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "reset" }));
     }
+    if (this.ttsManager) this.ttsManager.stop();
     this.subtitleManager.clearAll();
     this._clearInterimText();
     this.elements.sttBadge.textContent = "等待输入...";
@@ -195,11 +254,14 @@ class InterpretApp {
         },
       }));
     }
+    // 同步更新 TTS 语言
+    if (this.ttsManager) {
+      this.ttsManager.setLanguage(this.elements.targetLang.value);
+    }
   }
 
-  /**
-   * 显示中间识别结果 (原文面板顶部)
-   */
+  // =========== 中间结果显示 ===========
+
   _showInterimText(text) {
     let interim = this.originalContainer?.querySelector(".interim-text");
     if (!interim) {
@@ -221,13 +283,12 @@ class InterpretApp {
     return document.getElementById("originalContent");
   }
 
-  /**
-   * 处理服务器消息
-   */
+  // =========== 消息处理 ===========
+
   _handleServerMessage(data) {
     switch (data.type) {
       case "connected":
-        console.log(`[服务器] 已连接`);
+        console.log("[服务器] 已连接");
         break;
 
       case "partial_stt":
@@ -250,6 +311,11 @@ class InterpretApp {
           corrections: data.corrections,
           timestamp: data.timestamp,
         });
+
+        // TTS: 朗读翻译结果（非修正内容不重复朗读）
+        if (!data.isCorrection && this.ttsManager) {
+          this.ttsManager.speak(data.translatedText);
+        }
         break;
 
       case "correction":
@@ -269,7 +335,7 @@ class InterpretApp {
     }
   }
 
-  // === 可视化 ===
+  // =========== 可视化 ===========
 
   _resizeVisualizer() {
     const canvas = this.elements.visualizer;

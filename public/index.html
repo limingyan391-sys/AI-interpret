@@ -13,6 +13,9 @@
       <div class="status-bar">
         <span class="status-indicator" id="statusIndicator"></span>
         <span class="status-text" id="statusText">未连接</span>
+        <span class="speaking-indicator" id="speakingIndicator" style="display:none;">
+          🔊 <span class="speaking-text">朗读中</span>
+        </span>
       </div>
     </div>
   </header>
@@ -50,8 +53,9 @@
       </div>
 
       <div class="control-actions">
+        <button class="btn btn-tts active" id="btnTts">🔊 语音</button>
         <button class="btn btn-secondary" id="btnReset">🔄 重置</button>
-        <button class="btn btn-secondary" id="btnClear">🗑️ 清空字幕</button>
+        <button class="btn btn-secondary" id="btnClear">🗑️ 清空</button>
       </div>
     </section>
 

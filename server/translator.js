@@ -207,16 +207,14 @@ class Translator {
    * 动态更新源语言
    */
   setSourceLang(lang) {
-    this.sourceLang = lang;
-    console.log(`[翻译] 源语言切换为: ${lang}`);
+    this.sourceLang = lang; this.history = []; this.allSegments = []; console.log(`[翻译] 源语言切换为: ${lang}`);
   }
 
   /**
    * 动态更新目标语言
    */
   setTargetLang(lang) {
-    this.targetLang = lang;
-    console.log(`[翻译] 目标语言切换为: ${lang}`);
+    this.targetLang = lang; this.history = []; this.allSegments = []; console.log(`[翻译] 目标语言切换为: ${lang}`);
   }
 
   reset() {
@@ -227,4 +225,6 @@ class Translator {
 }
 
 module.exports = Translator;
+
+
 
