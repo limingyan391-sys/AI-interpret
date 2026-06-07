@@ -288,6 +288,13 @@ class InterpretApp {
 
   // =========== 消息处理 ===========
 
+  // =========== 导出字幕 ===========
+
+  exportSubtitles() {
+    const format = this.elements.exportFormat.value;
+    this.subtitleManager.exportSubtitles(format);
+  }
+
   _handleServerMessage(data) {
     switch (data.type) {
       case "connected":

@@ -254,16 +254,8 @@ class SubtitleManager {
       index++;
     }
 
-    // 下载文件
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+        // 下载文件（优先使用「另存为」对话框）
+    this._downloadFile(content, filename, mimeType);
   }
 
 
@@ -286,7 +278,7 @@ class SubtitleManager {
         await writable.close();
         return;
       } catch (e) {
-        if (e.name === "AbortError" || e.name === "SecurityError") return;
+        if (e.name === "AbortError") return;
         console.warn("[export] showSaveFilePicker 失败，回退到默认下载", e);
       }
     }
