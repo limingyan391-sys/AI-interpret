@@ -156,8 +156,8 @@ PR 5: DeepSeek API 集成 + 浏览器端 Web Speech API（免费语音识别）
 PR 6: 修复语言切换不同步 Bug — 翻译器语言方向与界面保持同步
 PR 7: TTS 语音合成 — 翻译结果自动朗读，朗读队列防重叠
 PR 8: 单元测试 — Jest 框架，55 tests，77% 覆盖率
-PR 9: 流式翻译 — 实时逐词显示翻译结果（独立分支）
-PR10: 流式TTS — 流式翻译完成时立即朗读完整句子（独立分支）
+PR 9: 流式翻译 — 实时逐词显示翻译结果
+PR10: 流式TTS — 流式翻译完成时即句朗读完整句子
 PR11: 字幕导出 — SRT / TXT 格式导出，SecurityError 回退修复
 ```
 
@@ -173,6 +173,7 @@ PR11: 字幕导出 — SRT / TXT 格式导出，SecurityError 回退修复
    - 支持 DeepSeek / OpenAI 双模式（API 格式兼容）
    - 上下文感知翻译，保留最近 10 条历史
    - 系统提示词控制翻译风格和输出格式
+   - 支持流式翻译：通过 WebSocket 逐步返回翻译结果，前端实时逐词显示
 
 3. **修正机制** (`server/translator.js`)
    - Levenshtein 编辑距离计算文本相似度
@@ -183,12 +184,21 @@ PR11: 字幕导出 — SRT / TXT 格式导出，SecurityError 回退修复
 4. **TTS 语音朗读** (`public/js/subtitles.js`)
    - 使用浏览器 `SpeechSynthesis` API
    - 自动朗读翻译结果，支持朗读队列防重叠
+   - 流式朗读：按句子边界切割流式翻译内容，完整句子到来即朗读
    - 根据目标语言自动选择对应语音
    - 一键开关，朗读状态指示器
 
 5. **单元测试** (`tests/`)
    - Jest 测试框架，57 个测试用例全部通过
    - 覆盖率：config 100% / translator 91% / mock 100% / websocket 51%
+
+6. **字幕导出** (`public/js/subtitles.js`)
+   - 遍历翻译面板中的字幕项，提取时间戳、原文和译文
+   - SRT 格式：标准字幕格式，含序号和时间轴（HH:MM:SS,000），适合播放器加载
+   - TXT 格式：纯文本格式，含时间戳、原文和译文标签，方便复制分享
+   - 优先使用 File System Access API（showSaveFilePicker）弹出系统另存为对话框
+   - 若另存为失败或不可用，自动回退到 Blob URL + 临时 <a> 标签点击下载
+   - 空内容时弹出提示，避免导出空文件
 
 ## 📦 依赖
 
