@@ -1,4 +1,4 @@
-﻿// server/websocket.js
+// server/websocket.js
 // AI同声传译 - WebSocket 通信模块
 // 支持 browser STT 模式 (接收文本) 和 whisper 模式 (接收音频)
 
@@ -134,11 +134,21 @@ class WebSocketManager {
       timestamp: Date.now(),
     });
 
-    const sttResult = await this.stt.transcribe(text);
-    if (!sttResult.text) return;
-
-    const translationResult = await this.translator.translate(sttResult.text, {
+    // browser 模式直接透传文本，跳过 stt.transcribe
+    // 流式翻译：通过 onChunk 回调实时推送翻译进度
+    let _streamSegId = 0;
+    const translationResult = await this.translator.translate(text, {
       timestamp: Date.now(),
+      onChunk: (delta, partialText, segId) => {
+        _streamSegId = segId;
+        this._send(ws, {
+          type: "translation_chunk",
+          segmentId: segId,
+          delta,
+          partialText,
+          timestamp: Date.now(),
+        });
+      },
     });
 
     if (translationResult.translatedText) {
@@ -147,7 +157,7 @@ class WebSocketManager {
       this._send(ws, {
         type: "translation",
         segmentId: translationResult.segmentId,
-        originalText: sttResult.text,
+        originalText: text,
         translatedText: translationResult.translatedText,
         isCorrection: translationResult.isCorrection,
         corrections: translationResult.corrections || [],
@@ -156,13 +166,13 @@ class WebSocketManager {
 
       if (translationResult.isCorrection && translationResult.corrections) {
         for (const c of translationResult.corrections) {
-          console.log(`[修正] ${c.originalText} → ${sttResult.text}`);
+          console.log(`[修正] ${c.originalText} → ${text}`);
           this._send(ws, {
             type: "correction",
             originalSegmentId: c.originalSegmentId,
             originalText: c.originalText,
             originalTranslation: c.originalTranslation,
-            correctedText: sttResult.text,
+            correctedText: text,
             correctedTranslation: translationResult.translatedText,
             correctionType: c.type,
             confidence: c.confidence,

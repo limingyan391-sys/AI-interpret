@@ -1,4 +1,4 @@
-﻿// public/js/subtitles.js
+// public/js/subtitles.js
 // AI同声传译 - 字幕显示模块 (增强修正显示)
 // 管理原文和翻译结果的字幕渲染，支持原位修正更新和修正动画
 
@@ -12,6 +12,7 @@ class SubtitleManager {
     this.maxItems = options.maxItems || 20;
     this.translationItemMap = new Map();
     this.originalItemMap = new Map();
+    this.streamingItemMap = new Map();
 
     this.timeFormatter = new Intl.DateTimeFormat("zh-CN", {
       hour: "2-digit",
@@ -82,6 +83,13 @@ class SubtitleManager {
       }
     }
 
+    // 清除对应的流式条目
+    const streamKey = "stream_" + segmentId;
+    const streamItem = this.streamingItemMap.get(streamKey);
+    if (streamItem) {
+      streamItem.remove();
+      this.streamingItemMap.delete(streamKey);
+    }
     // 检查是否已有相同 segmentId 的条目
     const existingItem = this.translationItemMap.get(segmentId);
     if (existingItem) {
@@ -111,6 +119,41 @@ class SubtitleManager {
     this.translationContainer.appendChild(item);
     this.translationItemMap.set(segmentId, item);
     this._trimContainer(this.translationContainer);
+    this._scrollToBottom(this.translationContainer);
+  }
+
+  /**
+   * 流式更新翻译文本
+   */
+  updateStreamingTranslation(segmentId, partialText) {
+    if (!segmentId || !partialText) return;
+    const key = "stream_" + segmentId;
+    let item = this.streamingItemMap.get(key);
+    if (item) {
+      const textEl = item.querySelector(".item-text");
+      if (textEl && textEl.textContent !== partialText) {
+        textEl.textContent = partialText;
+      }
+      return;
+    }
+    const time = this._formatTime(Date.now());
+    const div = document.createElement("div");
+    div.className = "subtitle-item streaming";
+    div.dataset.segmentId = key;
+    const timeEl = document.createElement("span");
+    timeEl.className = "item-time";
+    timeEl.textContent = time;
+    const label = document.createElement("span");
+    label.className = "item-label translated";
+    label.textContent = "翻译中...";
+    const textEl = document.createElement("span");
+    textEl.className = "item-text streaming-cursor";
+    textEl.textContent = partialText;
+    div.appendChild(timeEl);
+    div.appendChild(label);
+    div.appendChild(textEl);
+    this.translationContainer.appendChild(div);
+    this.streamingItemMap.set(key, div);
     this._scrollToBottom(this.translationContainer);
   }
 

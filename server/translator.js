@@ -1,4 +1,4 @@
-﻿// server/translator.js
+// server/translator.js
 // AI同声传译 - 翻译模块 (增强版修正机制 + 语言切换感知)
 // 支持 DeepSeek / OpenAI 双模式 (API格式兼容)
 
@@ -44,20 +44,28 @@ class Translator {
     const targetName = LANG_NAMES[this.targetLang] || this.targetLang;
 
     return [
-      "你是一个专业的实时同声传译系统。",
-      "将输入文本实时翻译成目标语言，输出自然流畅。",
+      "你是一个专业的实时同声传译系统。你的任务只有一个：将输入的文本从源语言翻译成目标语言。",
       "",
-      "核心要求:",
-      `1. 将${sourceName}翻译成${targetName}`,
-      "2. 保持原意，使用自然的目标语言表达",
-      "3. 如果原文不完整（如句子中途截断），根据上下文合理推断",
-      "4. 专业术语保持一致性",
-      "5. 只输出翻译结果，不加引号或原文",
-      "6. 无法识别时输出: [无法识别]",
+      "## 绝对规则",
+      `1. 必须把输入的${sourceName}翻译成${targetName}，严禁输出其他语言`,
+      "2. 只输出翻译结果，不解释、不添加任何额外内容",
+      "3. 保持原意，使用自然地道的目标语言表达",
+      `4. 如果你输出了${targetName}以外的语言，就是严重错误`,
+      "5. 无法识别时只输出: [无法识别]",
       "",
-      "修正意识:",
-      "- 如果新输入修正了之前的识别错误，在翻译中体现",
-      "- 对之前不完整的句子，在上下文中补全含义",
+      "## 示例",
+      "如果源语言是中文，目标语言是日语：",
+      "  输入: 原文: 今天天气真好",
+      "  输出: 今日は天気が本当にいいですね",
+      "如果源语言是中文，目标语言是韩语：",
+      "  输入: 原文: 谢谢",
+      "  输出: 감사합니다",
+      "如果源语言是中文，目标语言是英语：",
+      "  输入: 原文: 你好",
+      "  输出: Hello",
+      "",
+      "记住：你必须严格按照当前设定的语言方向翻译，",
+      `只用${targetName}输出，不要使用其他语言。`,
     ].join("\n");
   }
 
@@ -77,50 +85,69 @@ class Translator {
       ];
 
       // === 语言切换感知 ===
-      // 如果用户切换了源语言或目标语言，在对话中插入一条切换通知
-      // 让模型明确知道语言方向已改变，避免被历史记录带偏
+      // 检测源语言或目标语言是否发生了切换
+      // 如果切换了，向模型注入明确的语言方向信号
+      // 注意：即使历史为空也要注入，确保模型不会默认输出英文
       const langChanged = (this.sourceLang !== this._lastSourceLang) ||
                           (this.targetLang !== this._lastTargetLang);
-      if (langChanged && this.history.length > 0) {
+      if (langChanged) {
         const oldSource = LANG_NAMES[this._lastSourceLang] || this._lastSourceLang;
         const oldTarget = LANG_NAMES[this._lastTargetLang] || this._lastTargetLang;
         const newSource = LANG_NAMES[this.sourceLang] || this.sourceLang;
         const newTarget = LANG_NAMES[this.targetLang] || this.targetLang;
 
-        // 插入语言切换通知，让模型明确新的语言方向
-        messages.push({
-          role: "user",
-          content: `【语言切换通知】前面的对话是从${oldSource}到${oldTarget}的互译示例。现在请改为将${newSource}翻译成${newTarget}。接下来的输入都将遵循这个新的语言方向。`,
-        });
+        let directionMsg;
+        if (this.history.length > 0) {
+          // 有历史记录：通知切换
+          directionMsg = `【语言切换通知】前面的对话是从${oldSource}到${oldTarget}的互译示例。现在请改为将${newSource}翻译成${newTarget}。接下来的输入都将遵循这个新的语言方向。`;
+          console.log(`[翻译] 语言方向变更: ${oldSource}→${oldTarget} => ${newSource}→${newTarget}`);
+        } else {
+          // 无历史记录：直接设定方向
+          directionMsg = `【语言设定】当前翻译方向为：将${newSource}翻译成${newTarget}。请严格遵循这个方向。`;
+          console.log(`[翻译] 语言方向设定: ${newSource}→${newTarget}`);
+        }
+
+        messages.push({ role: "user", content: directionMsg });
         messages.push({
           role: "assistant",
-          content: `明白，现在开始将${newSource}翻译成${newTarget}，不会再使用之前的语言方向。`,
+          content: `明白，我将严格将${newSource}翻译成${newTarget}。`,
         });
-
-        console.log(`[翻译] 语言方向变更: ${oldSource}→${oldTarget} => ${newSource}→${newTarget}`);
       }
 
       // 记录当前语言设置，供下次检测
       this._lastSourceLang = this.sourceLang;
       this._lastTargetLang = this.targetLang;
 
-      // 添加上下文历史
-      const recentHistory = this.history.slice(-this.contextWindowSize);
-      for (const item of recentHistory) {
-        messages.push({ role: "user", content: `原文: ${item.originalText}` });
-        messages.push({ role: "assistant", content: item.translatedText });
+      // 添加上下文历史（仅当语言方向一致时才使用历史）
+      if (!langChanged) {
+        const recentHistory = this.history.slice(-this.contextWindowSize);
+        for (const item of recentHistory) {
+          messages.push({ role: "user", content: `原文: ${item.originalText}` });
+          messages.push({ role: "assistant", content: item.translatedText });
+        }
       }
 
-      messages.push({ role: "user", content: `原文: ${text}` });
+            messages.push({ role: "user", content: `原文: ${text}` });
 
-      const response = await this.client.chat.completions.create({
+      // 流式翻译：逐 token 推送，让前端实时显示翻译进度
+      const onChunk = meta.onChunk;
+      const stream = await this.client.chat.completions.create({
         model: this.model,
         messages,
-        temperature: 0.3,
-        max_tokens: 200,
+        temperature: 0.1,
+        max_tokens: 400,
+        stream: true,
       });
 
-      const translatedText = response.choices[0]?.message?.content?.trim() || "";
+      let translatedText = "";
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content || "";
+        if (delta) {
+          translatedText += delta;
+          onChunk?.(delta, translatedText, segmentId);
+        }
+      }
+      translatedText = translatedText.trim();
 
       this.history.push({
         segmentId, originalText: text, translatedText, timestamp,
@@ -143,7 +170,6 @@ class Translator {
     }
   }
 
-  // ... (rest of the methods unchanged)
   _detectCorrections(currentText, currentSegmentId) {
     const corrections = [];
     if (currentText.length < 15) return { hasCorrection: false, corrections };
@@ -218,18 +244,25 @@ class Translator {
 
   setSourceLang(lang) {
     this.sourceLang = lang;
+    this._clearHistory();
     console.log(`[翻译] 源语言切换为: ${lang}`);
   }
 
   setTargetLang(lang) {
     this.targetLang = lang;
+    this._clearHistory();
     console.log(`[翻译] 目标语言切换为: ${lang}`);
   }
 
   reset() {
+    this._clearHistory();
+    this.segmentIdCounter = 0;
+  }
+
+  _clearHistory() {
     this.history = [];
     this.allSegments = [];
-    this.segmentIdCounter = 0;
+    // segmentIdCounter 不重置，防止前端覆盖旧条目
   }
 }
 

@@ -458,3 +458,20 @@ body {
   0%, 100% { opacity: 0.8; }
   50% { opacity: 1; box-shadow: 0 0 6px rgba(5, 150, 105, 0.3); }
 }
+
+/* 流式翻译光标闪烁 */
+.subtitle-item.streaming {
+  background: var(--primary-light);
+  border-left-color: var(--success);
+  opacity: 0.9;
+}
+.item-text.streaming-cursor::after {
+  content: "|";
+  animation: blink-cursor 0.8s step-end infinite;
+  color: var(--success);
+  font-weight: bold;
+  margin-left: 2px;
+}
+@keyframes blink-cursor {
+  50% { opacity: 0; }
+}
