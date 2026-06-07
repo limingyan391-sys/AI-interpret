@@ -172,19 +172,33 @@ class Translator {
 
   _detectCorrections(currentText, currentSegmentId) {
     const corrections = [];
-    if (currentText.length < 15) return { hasCorrection: false, corrections };
+    const _isCJK = (s) => /[一-鿿぀-ゟ゠-ヿ가-힯]/.test(s);
+    const cjkRatio = _isCJK(currentText) ? 0.5 : 1.0;
+    if (currentText.length < Math.round(15 * cjkRatio)) return { hasCorrection: false, corrections };
 
     const recentSegments = this.allSegments.filter(
       (s) => s.segmentId !== currentSegmentId
     ).slice(-5);
 
     for (const prev of recentSegments) {
-      if (prev.originalText.length < 10) continue;
+      const prevCJK = _isCJK(prev.originalText);
+      if (prev.originalText.length < (prevCJK ? 5 : 10)) continue;
 
       const prevText = prev.originalText.toLowerCase();
       const currText = currentText.toLowerCase();
 
-      if (!this._hasCommonWord(currText, prevText)) continue;
+      const isCJKText = _isCJK(currText) || _isCJK(prevText);
+      if (isCJKText) {
+        // 用字符重叠率代替子串包含，处理中间插词的情况
+        const charsA = new Set(currText);
+        const charsB = new Set(prevText);
+        let common = 0;
+        for (const ch of charsB) { if (charsA.has(ch)) common++; }
+        const overlap = common / Math.min(charsA.size, charsB.size);
+        if (overlap < 0.5) continue;
+      } else {
+        if (!this._hasCommonWord(currText, prevText)) continue;
+      }
 
       const similarity = this._levenshteinSimilarity(currText, prevText);
       if (similarity > 0.45 && similarity < 0.95) {
@@ -199,7 +213,8 @@ class Translator {
         continue;
       }
 
-      if (currText.includes(prevText) && currText.length > prevText.length * 1.3) {
+      const expansionThreshold = _isCJK(currText) ? 1.1 : 1.3;
+      if (currText.includes(prevText) && currText.length > prevText.length * expansionThreshold) {
         corrections.push({
           originalSegmentId: prev.segmentId, originalText: prev.originalText,
           originalTranslation: prev.translatedText, newText: currentText,
@@ -208,7 +223,7 @@ class Translator {
         continue;
       }
 
-      if (prevText.includes(currText) && prevText.length > currText.length * 1.3) {
+      if (prevText.includes(currText) && prevText.length > currText.length * expansionThreshold) {
         corrections.push({
           originalSegmentId: prev.segmentId, originalText: prev.originalText,
           originalTranslation: prev.translatedText, newText: currentText,

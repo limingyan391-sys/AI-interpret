@@ -244,8 +244,10 @@ class SpeechCapture {
   setLanguage(langCode) {
     this.currentLang = this.langMap[langCode] || "en-US";
     if (this.isCapturing && this.isListening) {
-      // 重启识别以应用新语言
       if (this.recognition) {
+        // 切断旧实例的回调，防止异步 onend 干扰新会话 (避免级联重启)
+        this.recognition.onend = null;
+        this.recognition.onerror = null;
         try { this.recognition.stop(); } catch (e) { /* ignore */ }
       }
       this.isListening = false;
