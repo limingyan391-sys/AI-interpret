@@ -11,6 +11,7 @@
 - **音频可视化**：实时显示音频频谱
 - **双语字幕**：原文和译文并排展示，支持原位修正更新
 - **多语言支持**：英语/中文/日语/韩语/法语/德语/西班牙语互译
+- **字幕导出**：支持 SRT / TXT 格式导出翻译字幕，一键保存
 - **一键演示**：`npm run demo` 零配置即可体验完整功能
 
 ## 🚀 快速开始
@@ -103,11 +104,11 @@ ai-interpret/
 │       ├── audio.js     # Web Speech API 语音捕获
 │       └── subtitles.js # 字幕显示 + TTS 引擎
 ├── tests/               # 单元测试
-│   ├── config.test.js   # 配置模块测试 (12 tests)
-│   ├── translator.test.js # 翻译+修正检测测试 (17 tests)
-│   ├── stt.test.js      # STT 引擎测试 (5 tests)
-│   ├── mock.test.js     # 模拟模块测试 (8 tests)
-│   └── websocket.test.js # WebSocket 消息路由测试 (13 tests)
+│   ├── config.test.js     # 配置模块测试 (12 tests)
+│   ├── translator.test.js   # 翻译+修正检测测试 (17 tests)
+│   ├── stt.test.js          # STT 引擎测试 (5 tests)
+│   ├── mock.test.js         # 模拟模块测试 (8 tests)
+│   └── websocket.test.js     # WebSocket 消息路由测试 (13 tests)
 ├── .env.example         # 环境变量模板
 ├── package.json
 └── README.md
@@ -141,6 +142,9 @@ PR 5: DeepSeek API 集成 + 浏览器端 Web Speech API
 PR 6: 修复语言切换不同步 Bug
 PR 7: TTS 语音合成 - 翻译结果自动朗读
 PR 8: 单元测试 - Jest 框架, 55 tests, 77% 覆盖率
+PR 9: 流式翻译 - 实时逐词显示翻译结果（独立分支）
+PR10: 流式TTS - 流式翻译完成时立即朗读完整句子（独立分支）
+PR11: 字幕导出 - 支持 SRT / TXT 格式导出翻译字幕
 ```
 
 ### 核心模块
@@ -169,7 +173,7 @@ PR 8: 单元测试 - Jest 框架, 55 tests, 77% 覆盖率
    - 一键开关，朗读状态指示器
 
 5. **单元测试** (`tests/`)
-   - Jest 测试框架，55 个测试用例全部通过
+   - Jest 测试框架，57 个测试用例全部通过
    - 覆盖率：config 100% / translator 91% / mock 100% / websocket 51%
 
 ## 📦 依赖
@@ -191,7 +195,7 @@ PR 8: 单元测试 - Jest 框架, 55 tests, 77% 覆盖率
 ## 🧪 运行测试
 
 ```bash
-npm test              # 运行所有测试 (55 tests)
+npm test              # 运行所有测试 (57 tests)
 npm run test:watch    # 监听模式
 npm run test:coverage # 覆盖率报告
 ```
