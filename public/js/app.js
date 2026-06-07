@@ -334,7 +334,8 @@ class InterpretApp {
     } else if (fullText) {
       this.ttsManager.speak(fullText);
     }
-=======
+  }
+
   // =========== 导出字幕 ===========
 
   exportSubtitles() {
