@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "ai-real-time-interpret",
   "version": "1.0.0",
   "description": "AI实时同声传译助手 - 将外语演讲/会议/网课实时翻译为中文",
@@ -7,16 +7,27 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "demo": "node server/index.js --demo",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest --verbose",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
-  "keywords": ["ai", "interpretation", "translation", "real-time", "speech-to-text"],
+  "keywords": [
+    "ai",
+    "interpretation",
+    "translation",
+    "real-time",
+    "speech-to-text"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "dotenv": "^16.4.7",
     "express": "^4.21.0",
-    "ws": "^8.18.0",
     "openai": "^4.73.0",
-    "dotenv": "^16.4.7"
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
   }
 }
