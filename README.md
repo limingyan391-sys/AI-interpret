@@ -130,24 +130,18 @@ ai-interpret/
 
 ### 数据流
 
-```
-                          浏览器端                             服务端
-                    ┌─────────────────────────────────────┐
-                    │ Web Speech API                       │
-                    │ (语音识别, 免费)    ──stt_result──▶  │  DeepSeek/GPT
-                    │                                     │  翻译引擎
-                    │                    ◀──translation── │
-                    │ TTS 语音朗读                          │
-                    │ 字幕显示 + 修正更新                    │
-                    │ 字幕导出 (SRT/TXT) ──→ 本地文件       │
-                    └─────────────────────────────────────┘
-                           ↑ 用户
-                    麦克风 + 扬声器
-```
 
-### PR 演进历程
+    Browser (Client)                         Server
+    +------------------------------------------+
+    | Web Speech API (voice recog)              |
+    |       -- stt_result -->                   |
+    |       <-- translation --                  |
+    | TTS speech / subtitle display             |
+    | subtitle export (SRT/TXT) --> local file  |
+    +------------------------------------------+
+           ^ user
+      mic + speaker
 
-```
 PR 1: 项目脚手架搭建 — Express + WebSocket 基础框架
 PR 2: 后端服务 — WebSocket 通信 + STT 模块 + 翻译模块 + 演示模式
 PR 3: 前端增强 — 自动连接 + 原位修正 UI + 音频可视化
